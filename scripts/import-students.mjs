@@ -20,33 +20,42 @@ function parseEnv(text) {
   return Object.fromEntries(text.split(/\r?\n/).map((line) => line.match(/^([A-Z0-9_]+)=(.*)$/)).filter(Boolean).map((match) => [match[1], match[2].trim().replace(/^['"]|['"]$/g, "")]));
 }
 
-// 支持带引号字段（字段内可含逗号、换行、双引号转义）。
+// 支持带引号字段（字段内可含逗号、换行、双引号转义）；同时记录每行在文件中的真实行号，报错不漂移。
 function parseCsv(text) {
   text = text.replace(/^\uFEFF/, "");
   const rows = [];
-  let row = [], field = "", inQuotes = false;
+  let row = [], field = "", inQuotes = false, line = 1, rowStartLine = 1;
+  const endRow = () => {
+    row.push(field);
+    field = "";
+    if (row.some((value) => value.trim() !== "")) rows.push({ line: rowStartLine, row });
+    row = [];
+    rowStartLine = line + 1;
+  };
   for (let index = 0; index < text.length; index += 1) {
     const character = text[index];
     if (inQuotes) {
       if (character === '"') {
         if (text[index + 1] === '"') { field += '"'; index += 1; }
         else inQuotes = false;
-      } else field += character;
+      } else {
+        if (character === "\n") line += 1;
+        field += character;
+      }
       continue;
     }
     if (character === '"') { inQuotes = true; continue; }
     if (character === ",") { row.push(field); field = ""; continue; }
     if (character === "\n" || character === "\r") {
       if (character === "\r" && text[index + 1] === "\n") index += 1;
-      row.push(field); field = "";
-      if (row.some((value) => value.trim() !== "")) rows.push(row);
-      row = [];
+      line += 1;
+      endRow();
       continue;
     }
     field += character;
   }
   row.push(field);
-  if (row.some((value) => value.trim() !== "")) rows.push(row);
+  if (row.some((value) => value.trim() !== "")) rows.push({ line: rowStartLine, row });
   return rows;
 }
 
@@ -59,27 +68,35 @@ const csvText = await readFile(csvPath, "utf8").catch(() => fail(`没有找到�
 const rows = parseCsv(csvText);
 if (rows.length < 2) fail("名单内容为空或只有表头。请参照 data/students-template.csv 填写。");
 
-const header = rows[0].map((value) => value.trim());
+const header = rows[0].row.map((value) => value.trim());
 const required = ["classId", "className", "classCode", "studentId", "name", "gender"];
 const missing = required.filter((column) => !header.includes(column));
-if (missing.length) fail(`表头缺少列：${missing.join("、")}。请保持与 data/students-template.csv 相同的表头。`);
+if (missing.length) {
+  const caseIssues = missing.filter((column) => header.some((name) => name.toLowerCase() === column.toLowerCase()));
+  fail(`表头缺少列：${missing.join("、")}。${
+    caseIssues.length
+      ? `检测到大小写不一致的列（${caseIssues.join("、")}）——表头区分大小写，请全部改成小写。`
+      : "请保持与 data/students-template.csv 完全相同的表头。"
+  }`);
+}
 const columnOf = (name) => header.indexOf(name);
 
 const students = [];
 const problems = [];
-rows.slice(1).forEach((row, rowIndex) => {
-  const line = rowIndex + 2;
+let strayQuote = false;
+rows.slice(1).forEach(({ line, row }) => {
   const record = Object.fromEntries(required.map((name) => [name, (row[columnOf(name)] ?? "").trim()]));
+  if (required.some((name) => record[name].includes('"'))) strayQuote = true;
   for (const name of required) if (!record[name]) problems.push(`第${line}行：${name} 为空`);
   if (!["1", "2", "3", "4"].includes(record.classId)) problems.push(`第${line}行：classId 必须是 1/2/3/4，当前为“${record.classId}”`);
   if (!["男", "女"].includes(record.gender)) problems.push(`第${line}行：gender 必须是 男或女，当前为“${record.gender}”`);
-  students.push(record);
+  students.push({ line, record });
 });
 
 const seenIds = new Map();
-students.forEach((record, index) => {
-  if (seenIds.has(record.studentId)) problems.push(`学号重复：${record.studentId}（第${seenIds.get(record.studentId)}行与第${index + 2}行）`);
-  else seenIds.set(record.studentId, index + 2);
+students.forEach(({ line, record }) => {
+  if (seenIds.has(record.studentId)) problems.push(`学号重复：${record.studentId}（第${seenIds.get(record.studentId)}行与第${line}行）`);
+  else seenIds.set(record.studentId, line);
 });
 if (problems.length) {
   console.error(`✖ 名单有 ${problems.length} 处问题，未导入任何数据：`);
@@ -87,11 +104,12 @@ if (problems.length) {
   if (problems.length > 20) console.error(`  ...其余 ${problems.length - 20} 条省略`);
   process.exit(1);
 }
+if (strayQuote) console.warn("⚠ 名单字段中残留英文双引号，可能由引号格式错误导致，请核对 CSV 后再正式导入。");
 
 function sqlValue(text) { return `'${String(text).replace(/'/g, "''")}'`; }
 
 function buildInsert(batch) {
-  const values = batch.map((record) => `(${sqlValue(crypto.randomUUID())}, ${sqlValue(record.classId)}, ${sqlValue(record.className)}, ${sqlValue(record.classCode)}, ${sqlValue(record.studentId)}, ${sqlValue(record.name)}, ${sqlValue(record.gender)})`).join(",\n  ");
+  const values = batch.map(({ record }) => `(${sqlValue(crypto.randomUUID())}, ${sqlValue(record.classId)}, ${sqlValue(record.className)}, ${sqlValue(record.classCode)}, ${sqlValue(record.studentId)}, ${sqlValue(record.name)}, ${sqlValue(record.gender)})`).join(",\n  ");
   return `INSERT INTO public.dorm_students (id, class_id, class_name, class_code, student_id, name, gender) VALUES\n  ${values}\nON CONFLICT (student_id) DO NOTHING;`;
 }
 
@@ -99,14 +117,14 @@ const batches = [];
 for (let index = 0; index < students.length; index += BATCH_SIZE) batches.push(students.slice(index, index + BATCH_SIZE));
 
 const perClass = {};
-students.forEach((record) => {
+students.forEach(({ record }) => {
   perClass[record.classId] ??= { 男: 0, 女: 0 };
   perClass[record.classId][record.gender] += 1;
 });
 console.log(`名单共 ${students.length} 名学生：`);
 Object.keys(perClass).sort().forEach((classId) => {
   const counts = perClass[classId];
-  console.log(`  ${classId}班（${students.find((record) => record.classId === classId).className}）：男 ${counts.男} 人、女 ${counts.女} 人`);
+  console.log(`  ${classId}班（${students.find((item) => item.record.classId === classId).record.className}）：男 ${counts.男} 人、女 ${counts.女} 人`);
 });
 
 if (dryRun) {
@@ -122,6 +140,7 @@ const envText = await readFile(path.join(projectDir, ".env.local"), "utf8").catc
 const envId = process.env.CLOUDBASE_ENV_ID || parseEnv(envText).CLOUDBASE_ENV_ID;
 if (!envId) fail(".env.local 中缺少 CLOUDBASE_ENV_ID");
 const cloudbaseCli = path.join(projectDir, "node_modules", "@cloudbase", "cli", "bin", "tcb");
+
 let done = 0;
 for (const batch of batches) {
   const result = spawnSync(process.execPath, [cloudbaseCli, "db", "execute", "-e", envId, "--sql", buildInsert(batch), "--json"], { cwd: projectDir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 10 * 1024 * 1024 });

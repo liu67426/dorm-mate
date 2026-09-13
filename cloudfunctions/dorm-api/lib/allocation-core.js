@@ -27,7 +27,9 @@
     "沟通方式": ["socialStyle", "visitors", "visitorTolerance", "conflictStyle", "borrow", "foodShare", "sharedItems"],
     "兴趣相近": ["hobbies", "gameGenres", "gameDevices"]
   });
-  const VERSION = "formal-v4.2";
+  const VERSION = "formal-v4.3";
+  // 单班回溯搜索的时间预算（毫秒）：超时后降级为贪心装箱，保证辅导员一定能拿到结果。
+  const DEFAULT_TIME_BUDGET_MS = 8000;
 
   // 仅用于辅导员的分配说明；不把自由文本或特殊需求加入自动判定。
   function explainPairConflicts(a, b) {
@@ -185,12 +187,26 @@
     return { compatible: true, score, conflicts: [] };
   }
 
-  function groupCompatibility(members, weights = DEFAULT_WEIGHTS) {
+  // 大班分寝时同一对学生会被反复比较；按学生ID缓存两两结果，避免组合搜索退化成秒级等待。
+  function createPairCache() { return new Map(); }
+
+  function cachedPairCompatibility(a, b, weights, cache) {
+    if (!cache) return pairCompatibility(a, b, weights);
+    const key = a.id < b.id ? `${a.id}|${b.id}` : `${b.id}|${a.id}`;
+    let result = cache.get(key);
+    if (!result) {
+      result = pairCompatibility(a, b, weights);
+      cache.set(key, result);
+    }
+    return result;
+  }
+
+  function groupCompatibility(members, weights = DEFAULT_WEIGHTS, cache = null) {
     if (members.length < 2) return { compatible: true, score: 100, conflicts: [] };
     const scores = [], conflicts = [];
     for (let i = 0; i < members.length; i += 1) {
       for (let j = i + 1; j < members.length; j += 1) {
-        const result = pairCompatibility(members[i], members[j], weights);
+        const result = cachedPairCompatibility(members[i], members[j], weights, cache);
         if (!result.compatible) conflicts.push(`${members[i].name} / ${members[j].name}：${result.conflicts[0]}`);
         else scores.push(result.score);
       }
@@ -199,12 +215,12 @@
   }
 
   // 不同组队单元之间必须通过住宿底线；原组队内部差异不在这里拆组。
-  function unitCompatibility(units, weights = DEFAULT_WEIGHTS) {
+  function unitCompatibility(units, weights = DEFAULT_WEIGHTS, cache = null) {
     const scores = [], conflicts = [];
     for (let left = 0; left < units.length; left += 1) {
       for (let right = left + 1; right < units.length; right += 1) {
         for (const a of units[left].members) for (const b of units[right].members) {
-          const result = pairCompatibility(a, b, weights);
+          const result = cachedPairCompatibility(a, b, weights, cache);
           if (!result.compatible) conflicts.push(...explainPairConflicts(a, b));
           else scores.push(result.score);
         }
@@ -225,70 +241,26 @@
     return errors;
   }
 
-  function combinationsForSlots(units, slots) {
-    const results = [];
-    function visit(start, picked, count) {
-      if (count === slots) { results.push([...picked]); return; }
-      if (count > slots) return;
-      for (let index = start; index < units.length; index += 1) {
-        picked.push(units[index]);
-        visit(index + 1, picked, count + units[index].members.length);
-        picked.pop();
-      }
-    }
-    visit(0, [], 0);
-    return results;
-  }
-
-  function bestCandidates(seed, pool, slots, weights) {
-    const eligible = pool.filter((unit) => unit.members.length <= slots);
-    const limits = eligible.length <= 32 ? [eligible.length] : [32, Math.min(64, eligible.length)];
-    for (const limit of limits) {
-      const shortlist = [];
-      for (let size = 1; size <= slots; size += 1) {
-        const sameSize = eligible.filter((unit) => unit.members.length === size).map((unit) => ({
-          unit,
-          compatibility: unitCompatibility([seed, unit], weights)
-        })).filter((item) => item.compatibility.compatible).sort((a, b) => b.compatibility.score - a.compatibility.score || a.unit.id.localeCompare(b.unit.id));
-        shortlist.push(...sameSize.slice(0, limit).map((item) => item.unit));
-      }
-      let frontier = [{ parts: [], members: seed.members, seats: 0, nextIndex: 0, compatibility: { score: 100 } }];
-      const complete = [];
-      for (let depth = 0; depth < slots && frontier.length; depth += 1) {
-        const next = [];
-        frontier.forEach((state) => {
-          for (let index = state.nextIndex; index < shortlist.length; index += 1) {
-            const unit = shortlist[index];
-            const seats = state.seats + unit.members.length;
-            if (seats > slots) continue;
-            const members = [...state.members, ...unit.members];
-            const compatibility = unitCompatibility([seed, ...state.parts, unit], weights);
-            if (!compatibility.compatible) continue;
-            const candidate = { parts: [...state.parts, unit], members, seats, nextIndex: index + 1, compatibility };
-            if (seats === slots) complete.push(candidate);
-            else next.push(candidate);
-          }
-        });
-        frontier = next.sort((a, b) => b.compatibility.score - a.compatibility.score || a.parts.map((unit) => unit.id).join("|").localeCompare(b.parts.map((unit) => unit.id).join("|"))).slice(0, 24);
-      }
-      if (complete.length) return [complete.sort((a, b) => b.compatibility.score - a.compatibility.score || a.parts.map((unit) => unit.id).join("|").localeCompare(b.parts.map((unit) => unit.id).join("|")))[0]];
-    }
-    return [];
-  }
-
-  function packUnitsGlobally(units, weights) {
+  function packUnitsGlobally(units, weights, options = {}) {
     if (!units.length) return { rooms: [], proven: true };
-    const compatibilityCount = new Map(units.map(unit => [unit.id, units.filter(other => other.id !== unit.id && unitCompatibility([unit, other], weights).compatible).length]));
+    const cache = options.pairCache || createPairCache();
+    // 回溯搜索按搜索步数和时间双重限流：步数防死循环，时间防大班组合爆炸。
+    // 超出预算时退回贪心装箱——宁可通过更多未满寝室分完，也不能让整班学生拿不到结果。
+    const nodeLimit = 500000;
+    const timeBudgetMs = Number(options.timeBudgetMs ?? DEFAULT_TIME_BUDGET_MS) || DEFAULT_TIME_BUDGET_MS;
+    const startedAt = Date.now();
+    let timeExhausted = false;
+    const compatibilityCount = new Map(units.map(unit => [unit.id, units.filter(other => other.id !== unit.id && unitCompatibility([unit, other], weights, cache).compatible).length]));
     const ordered = [...units].sort((a, b) => b.members.length - a.members.length || compatibilityCount.get(a.id) - compatibilityCount.get(b.id) || a.id.localeCompare(b.id));
     const totalSeats = ordered.reduce((sum, unit) => sum + unit.members.length, 0);
-    const nodeLimit = 500000;
     for (let target = Math.ceil(totalSeats / 4); target <= ordered.length; target += 1) {
       let nodes = 0, result = null;
       function visit(index, bins) {
         if (++nodes > nodeLimit) return false;
+        if ((nodes & 255) === 0 && Date.now() - startedAt > timeBudgetMs) { timeExhausted = true; return false; }
         if (index === ordered.length) { result = bins.map(bin => [...bin.parts]); return true; }
         const unit = ordered[index];
-        const choices = bins.map((bin, binIndex) => ({ binIndex, compatibility: bin.seats + unit.members.length <= 4 ? unitCompatibility([...bin.parts, unit], weights) : { compatible: false, score: -Infinity } }))
+        const choices = bins.map((bin, binIndex) => ({ binIndex, compatibility: bin.seats + unit.members.length <= 4 ? unitCompatibility([...bin.parts, unit], weights, cache) : { compatible: false, score: -Infinity } }))
           .filter(choice => choice.compatibility.compatible)
           .sort((a, b) => b.compatibility.score - a.compatibility.score || b.binIndex - a.binIndex);
         for (const choice of choices) {
@@ -307,13 +279,30 @@
       if (visit(0, [])) {
         return { proven: nodes <= nodeLimit, rooms: result.map(parts => {
           const members = parts.flatMap(unit => unit.members);
-          const compatibility = unitCompatibility(parts, weights);
+          const compatibility = unitCompatibility(parts, weights, cache);
           return { members, fixed: false, partial: members.length < 4, score: compatibility.score, warnings: [...new Set(parts.flatMap(unit => [...(unit.warnings || []), ...explainGroupConflicts(unit.members)]))] };
         }) };
       }
-      if (nodes > nodeLimit) break;
+      if (nodes > nodeLimit || timeExhausted) break;
     }
-    return null;
+    // 兜底：贪心装箱，保证每个学生都进寝室（部分寝室人数可能不足4人）。
+    const bins = [];
+    ordered.forEach((unit) => {
+      let best = null;
+      bins.forEach((bin) => {
+        if (bin.seats + unit.members.length > 4) return;
+        const compatibility = unitCompatibility([...bin.parts, unit], weights, cache);
+        if (!compatibility.compatible) return;
+        if (!best || compatibility.score > best.compatibility.score) best = { bin, compatibility };
+      });
+      if (best) { best.bin.parts.push(unit); best.bin.seats += unit.members.length; }
+      else bins.push({ parts: [unit], seats: unit.members.length });
+    });
+    return { proven: false, degraded: true, rooms: bins.map(parts => {
+      const members = parts.flatMap(unit => unit.members);
+      const compatibility = unitCompatibility(parts, weights, cache);
+      return { members, fixed: false, partial: members.length < 4, score: compatibility.score, warnings: [...new Set(parts.flatMap(unit => [...(unit.warnings || []), ...explainGroupConflicts(unit.members)]))] };
+    }) };
   }
 
   function allocateClass(units, options = {}) {
@@ -325,16 +314,17 @@
       if (errors.length) review.push({ unitId: unit.id, members: unit.members || [], reasons: errors });
       else validUnits.push(unit);
     });
+    const pairCache = createPairCache();
     const fixed = validUnits.filter((unit) => unit.members.length === 4);
     const pool = validUnits.filter((unit) => unit.members.length < 4).sort((a, b) => b.members.length - a.members.length || a.id.localeCompare(b.id));
     fixed.forEach((unit) => {
-      const compatibility = groupCompatibility(unit.members, weights);
+      const compatibility = groupCompatibility(unit.members, weights, pairCache);
       fixedRooms.push({ members: unit.members, fixed: true, preferredRoom: unit.preferredRoom || null, score: Number.isFinite(compatibility.score) ? compatibility.score : 0, warnings: explainGroupConflicts(unit.members) });
     });
-    const packed = packUnitsGlobally(pool, weights);
+    const packed = packUnitsGlobally(pool, weights, { timeBudgetMs: options.timeBudgetMs, pairCache });
     if (!packed) return { rooms: fixedRooms, pending: explainPending(pool), review };
     fixedRooms.push(...packed.rooms);
-    return { rooms: fixedRooms, pending: [], review };
+    return { rooms: fixedRooms, pending: [], review, degraded: Boolean(packed.degraded) };
   }
 
   function canChooseBed(assignments, studentId, bedNo) {
@@ -352,13 +342,14 @@
       if (!byCohort.has(cohortKey)) byCohort.set(cohortKey, { classId, gender, units: [] });
       byCohort.get(cohortKey).units.push(unit);
     });
-    const result = { version: VERSION, classes: {}, crossClassPending: [] };
+    const result = { version: VERSION, classes: {}, crossClassPending: [], degraded: false };
     byCohort.forEach(({ classId, gender, units: cohortUnits }) => {
       const allocation = allocateClass(cohortUnits, options);
       if (!result.classes[classId]) result.classes[classId] = { rooms: [], pending: [], review: [] };
       result.classes[classId].rooms.push(...allocation.rooms.map((room) => ({ ...room, gender })));
       result.classes[classId].pending.push(...allocation.pending);
       result.classes[classId].review.push(...allocation.review);
+      if (allocation.degraded) result.degraded = true;
       result.crossClassPending.push(...allocation.pending.map((student) => ({ ...student, gender })));
     });
     return result;

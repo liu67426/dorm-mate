@@ -155,7 +155,11 @@ document.getElementById("toggle-password").addEventListener("click", (event) => 
   event.currentTarget.textContent = showing ? "显示" : "隐藏";
 });
 document.getElementById("logout").addEventListener("click", () => closeWorkspace());
-app.addEventListener("click", () => sessionStorage.setItem(AUTH_KEY, String(Date.now())));
+app.addEventListener("click", () => {
+  // 工作台已关闭时（含刚点完退出的冒泡），不允许续期会话，否则退出后刷新会免密进入。
+  if (app.hidden) return;
+  sessionStorage.setItem(AUTH_KEY, String(Date.now()));
+});
 
 const pageTitles = { overview: "工作台总览", surveys: "问卷管理", groups: "组队审核", allocation: "分寝建议" };
 function activateView(view) {
@@ -264,6 +268,11 @@ document.getElementById("student-table").addEventListener("click", async (event)
   if (!button) return;
   const student = students.find((item) => item.id === button.dataset.resetBinding);
   if (!student) return showToast("没有找到这名学生，请刷新后重试");
+  if (!window.DormApi?.isCloud()) {
+    button.disabled = true;
+    button.textContent = "演示模式不可用";
+    return showToast("演示模式不连接数据库，重置设备绑定需正式部署后使用");
+  }
   const confirmed = window.confirm(`确定为${student.name}解除旧设备绑定吗？\n\n问卷、组队和住宿结果都会保留；解除后，该同学需要在新设备首页填写身份信息并点击“恢复”。`);
   if (!confirmed) return;
   button.disabled = true;
@@ -372,7 +381,13 @@ function renderRooms() {
   countPanel.innerHTML = `<span>已完成问卷 <b>${expectedIds.size}人</b></span><span>已进入寝室建议 <b>${placedIds.size}人</b></span><span>待辅导员处理 <b>${pendingIds.size}人</b></span><span>人数核对 <b>${missingCount ? `缺少${missingCount}人` : `${accountedIds.size}/${expectedIds.size}，已对上`}</b></span>`;
   const publishButton = document.getElementById("publish-allocation");
   publishButton.disabled = !generatedRunId || !window.DormApi?.isCloud() || missingCount > 0;
-  publishButton.textContent = missingCount ? `有${missingCount}人未计入，禁止发布` : pendingIds.size ? `确认发布（${pendingIds.size}人待处理）` : "确认发布";
+  if (generatedRunId && !window.DormApi?.isCloud()) {
+    publishButton.title = "演示模式不连接数据库，发布功能需正式部署后使用";
+    publishButton.textContent = "演示模式不可发布";
+  } else {
+    publishButton.title = "";
+    publishButton.textContent = missingCount ? `有${missingCount}人未计入，禁止发布` : pendingIds.size ? `确认发布（${pendingIds.size}人待处理）` : "确认发布";
+  }
   const pendingPanel = document.getElementById("pending-panel");
   pendingPanel.hidden = generatedPending.length === 0;
   document.getElementById("pending-list").innerHTML = generatedPending.map((item) => `<div class="pending-item"><b>${escapeHtml(item.name)} · ${escapeHtml(classMeta[item.classId]?.name || item.classId)} · ${escapeHtml(item.gender || "性别未登记")}</b><span>${escapeHtml(item.reason)}</span></div>`).join("");
@@ -444,3 +459,9 @@ async function renderAll() {
 
 if (validSession()) openWorkspace();
 else closeWorkspace("");
+
+// 演示模式在登录卡片上直接给出演示密码,免得新用户翻 README。
+if (!window.DormApi?.isCloud()) {
+  const hint = document.getElementById("demo-password-hint");
+  if (hint) hint.hidden = false;
+}

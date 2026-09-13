@@ -29,50 +29,55 @@
 4. 取兼容分最高的组合成寝；无法凑满的进入待处理清单，不会漏人。
 5. 床位分配使用可复现的种子随机：有审批特殊需求的学生优先匹配对应床位，其余随机。
 
-兼容分、冲突规则均为纯函数，带完整单元测试，可以脱离腾讯云单独复用。
+兼容分、冲突规则均为纯函数，带完整单元测试（含 200 人规模的性能回归），可以脱离腾讯云单独复用。规模性能：全年级 1600 人（每班 400）约 5 秒完成；极端数据触发单班 8 秒时间预算后自动降级为贪心装箱，保证辅导员总能拿到结果，而不是整班挂起。
 
 ## 架构
 
 ```
 静态网页（原生 HTML/CSS/JS，构建时注入配置）
-        │  调用
-        ▼
-云函数 dorm-api（Node.js 20 + zod 校验，@cloudbase/node-sdk）
-        │  读写
+        │  CloudBase WebSDK 匿名登录 / 辅导员密码登录
         ▼
 CloudBase PostgreSQL（7 张业务表 + 安全存储过程 RPC，行级安全保护）
 ```
 
-- 学生/辅导员身份由 CloudBase 内置认证签发，数据库从登录令牌读取真实 UID，无法通过伪造前端参数冒充他人。
-- 所有写操作走 `SECURITY DEFINER` 存储过程并在事务中完成，关键动作写入审计表。
-- 网页与云函数共享同一份分寝核心代码（`shared/` → 构建时同步到 `cloudfunctions/`）。
+- 网页通过数据库**安全函数（RPC）**直接完成全部业务：所有写操作走 `SECURITY DEFINER` 存储过程并在事务中完成，数据库从登录令牌读取真实用户 UID，无法通过伪造前端参数冒充他人，关键动作写入审计表。
+- `cloudfunctions/dorm-api` 是预留的服务端入口（Node.js 20 + zod 校验），当前网页不依赖它，部署时可以暂不部署云函数。
+- 网页与云函数共享同一份分寝核心代码（`shared/` → 构建时同步到 `cloudfunctions/`，有测试保证两份一致）。
 
 ## 拿到代码后怎么用
 
 **路线 A：5 分钟本地体验（不注册任何账号）**
 
+前置要求：Node.js 20 或更新版本（`node -v` 能查到版本即可）。无需 Python、无需先 `npm install`。
+
 ```bash
-npm run serve      # 需要 Python；或者 npx http-server -p 8770 .
+npm run serve
 ```
 
 浏览器打开 `http://127.0.0.1:8770/`：
 
-- 学生端：班级、填写码、姓名、学号**随便填**（例如 `工业机器人1班` / `01` / `张三` / `2026000100`），即可体验问卷、组队、邀请的完整流程。
-- 辅导员端：演示密码 `fdy2026`（只在本机演示模式有效，正式部署后以你自己设置的密码为准）。
+- 学生端：班级下拉选一个（如 `工业机器人1班`）、填写码填 `01`，姓名和学号随便填，即可体验问卷、组队、邀请的完整流程。
+- 辅导员端：演示密码 `fdy2026`（只在本机演示模式有效，登录页也会提示；正式部署后以你自己设置的密码为准）。
+- 演示模式的组队是**单机模拟**：邀请对象是内置示例同学，再次点击可模拟对方接受；真实的多人联机组队需要走路线 B 部署。
 
-演示数据只保存在浏览器 localStorage 里，不连接任何服务器。`npm run build` 构建出的 `dist/` 在未配置环境时同样是演示模式。
+演示数据只保存在浏览器 localStorage 里，不连接任何服务器（云端 SDK 也是点进云端功能时才按需加载）。页面打不开时，先关掉旧的终端窗口再启动——端口被占用会给出明确提示。`npm run build` 构建出的 `dist/` 在未配置环境时同样是演示模式。
 
 **路线 B：完整部署到腾讯云 CloudBase（免费档可跑）**
 
 详细步骤见 [`docs/CloudBase免费部署步骤.md`](docs/CloudBase免费部署步骤.md)，概要：
 
-1. 注册腾讯云并开通 CloudBase，创建环境，开启「匿名登录」和「用户名密码登录」，创建辅导员账号并记下其 UID。
+1. 注册腾讯云并开通 CloudBase，创建环境（地域选上海），开启「匿名登录」和「用户名密码登录」，在「静态网站托管」完成首次开通，创建辅导员账号并记下其 UID。
 2. 复制 `.env.example` 为 `.env.local`，填入环境 ID、地域和辅导员 UID。
-3. `npm install` 安装 CloudBase CLI。
-4. `node scripts/apply-database.mjs` 建表（自动把 `.env.local` 中的 UID 注入 SQL）。
-5. 名单按 `data/students-template.csv` 整理为 `data/students.csv`，先用 `node scripts/import-students.mjs data/students.csv --dry-run` 试运行检查，确认无误后去掉该参数正式导入。
-6. `npm run build`，然后 `npx cloudbase framework deploy` 部署云函数与静态网站（或按部署文档用 tcb CLI 分步执行）。
-7. 用 `scripts/set-counselor-password.ps1` 设置辅导员密码。
+3. `npm install` 安装 CloudBase CLI（就在开发依赖里，不要用 `--omit=dev`；国内网络慢可加 `--registry=https://registry.npmmirror.com`）。
+4. `npx cloudbase login` 完成浏览器授权登录（**全新电脑必做的一步**，换电脑后要重新登录；用 `npx cloudbase env list` 能列出环境即已登录）。
+5. `node scripts/apply-database.mjs` 建表（自动把 `.env.local` 中的 UID 注入 SQL）。
+6. 名单按 `data/students-template.csv` 整理为 `data/students.csv`，先用 `node scripts/import-students.mjs data/students.csv --dry-run` 试运行检查，确认无误后去掉该参数正式导入。
+7. `npm run build`，然后 `node node_modules/@cloudbase/cli/bin/tcb hosting deploy dist / -e 你的环境ID` 发布静态网站（网页全部业务走数据库 RPC，不依赖云函数）。
+8. 设置辅导员密码（Windows 自带 PowerShell 即可）：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/set-counselor-password.ps1
+```
 
 **部署后第一周怎么用**
 

@@ -33,12 +33,21 @@ function splitSql(source) {
   return statements;
 }
 
-const envText = await readFile(path.join(projectDir, ".env.local"), "utf8");
+const envText = await readFile(path.join(projectDir, ".env.local"), "utf8").catch(() => {
+  console.error("✖ 没有找到 .env.local。请先复制 .env.example 为 .env.local，填写环境 ID 和辅导员 UID 后重试。");
+  process.exit(1);
+});
 const localEnv = parseEnv(envText);
 const envId = process.env.CLOUDBASE_ENV_ID || localEnv.CLOUDBASE_ENV_ID;
-if (!envId) throw new Error("缺少 CLOUDBASE_ENV_ID");
+if (!envId) {
+  console.error("✖ .env.local 中缺少 CLOUDBASE_ENV_ID（腾讯云开发环境 ID）");
+  process.exit(1);
+}
 const adminUid = process.env.ADMIN_UID || localEnv.ADMIN_UID;
-if (!adminUid) throw new Error("缺少 ADMIN_UID（辅导员云开发账号的UID）");
+if (!adminUid) {
+  console.error("✖ .env.local 中缺少 ADMIN_UID（辅导员的云开发账号 UID）");
+  process.exit(1);
+}
 const cloudbaseCli = path.join(projectDir, "node_modules", "@cloudbase", "cli", "bin", "tcb");
 
 const databaseDir = path.join(projectDir, "database");

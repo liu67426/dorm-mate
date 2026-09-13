@@ -7,17 +7,23 @@ const path = require("node:path");
 const vm = require("node:vm");
 
 const projectDir = path.resolve(__dirname, "..");
-const studentHtml = fs.readFileSync(path.join(projectDir, "student", "index.html"), "utf8");
-const adminHtml = fs.readFileSync(path.join(projectDir, "admin", "index.html"), "utf8");
-const adminSource = fs.readFileSync(path.join(projectDir, "admin", "app.js"), "utf8");
-const functionSource = fs.readFileSync(path.join(projectDir, "cloudfunctions", "dorm-api", "index.js"), "utf8");
-const apiSource = fs.readFileSync(path.join(projectDir, "shared", "api.js"), "utf8");
-const joinRequestSql = fs.readFileSync(path.join(projectDir, "database", "005_join_requests.sql"), "utf8");
-const groupIntegritySql = fs.readFileSync(path.join(projectDir, "database", "007_group_integrity.sql"), "utf8");
-const functionAllocationSource = fs.readFileSync(path.join(projectDir, "cloudfunctions", "dorm-api", "lib", "allocation-core.js"), "utf8");
-const roommateHighlightsSql = fs.readFileSync(path.join(projectDir, "database", "009_roommate_priority_highlights.sql"), "utf8");
-const matchViewStudentRoleSql = fs.readFileSync(path.join(projectDir, "database", "010_match_view_student_role.sql"), "utf8");
-const resetBindingSql = fs.readFileSync(path.join(projectDir, "database", "011_admin_reset_student_binding.sql"), "utf8");
+
+// Windows 下克隆可能带 CRLF,统一成 LF 再做正则断言。
+function readSource(...segments) {
+  return fs.readFileSync(path.join(projectDir, ...segments), "utf8").replace(/\r\n/g, "\n");
+}
+
+const studentHtml = readSource("student", "index.html");
+const adminHtml = readSource("admin", "index.html");
+const adminSource = readSource("admin", "app.js");
+const functionSource = readSource("cloudfunctions", "dorm-api", "index.js");
+const apiSource = readSource("shared", "api.js");
+const joinRequestSql = readSource("database", "005_join_requests.sql");
+const groupIntegritySql = readSource("database", "007_group_integrity.sql");
+const functionAllocationSource = readSource("cloudfunctions", "dorm-api", "lib", "allocation-core.js");
+const roommateHighlightsSql = readSource("database", "009_roommate_priority_highlights.sql");
+const matchViewStudentRoleSql = readSource("database", "010_match_view_student_role.sql");
+const resetBindingSql = readSource("database", "011_admin_reset_student_binding.sql");
 
 test("学生问卷字段都能被云函数保存", () => {
   const formHtml = studentHtml.match(/<form[\s\S]*?<\/form>/)?.[0] || "";

@@ -29,6 +29,7 @@
           <button type="button" id="toggle-password" aria-label="显示密码">显示</button>
         </div>
         <div class="login-error" id="login-error" role="alert"></div>
+        <p class="demo-password-hint" id="demo-password-hint" hidden>当前是本机演示模式，演示密码：<b>fdy2026</b>（正式部署后此提示自动消失）</p>
         <button class="login-button" id="login-button" type="submit">进入工作台 <span>→</span></button>
         <div class="security-note"><span>◇</span><p><b>安全说明</b><br>联网版使用云端账号验证；连续输错会暂时锁定登录。</p></div>
       </form>
@@ -93,7 +94,6 @@
     </main>
   </div>
   <div class="toast" id="toast"></div>
-  <script src="https://static.cloudbase.net/cloudbase-js-sdk/3.8.2/cloudbase.full.js"></script>
   <script src="../shared/config.js"></script>
   <script src="../shared/allocation-core.js?v=20260906-optimal1"></script>
   <script src="../shared/group-core.js?v=20260904"></script>

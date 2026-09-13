@@ -4,6 +4,22 @@
   const config = window.DORM_CONFIG || {};
   const MOCK_KEY = "dorm-networked-mock-v1";
   let cloudApp;
+  let sdkLoader = null;
+
+  // 云 SDK 按需加载:演示模式完全不联网,云端模式在首次调用时才拉取脚本,避免弱网页面假死。
+  function loadCloudbaseSdk() {
+    if (window.cloudbase) return Promise.resolve();
+    if (!sdkLoader) {
+      sdkLoader = new Promise((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src = "https://static.cloudbase.net/cloudbase-js-sdk/3.8.2/cloudbase.full.js";
+        script.onload = resolve;
+        script.onerror = () => { sdkLoader = null; reject(new Error("CloudBase SDK没有加载成功")); };
+        document.head.appendChild(script);
+      });
+    }
+    return sdkLoader;
+  }
 
   // 页面只展示可理解的处理建议，不暴露数据库函数名、查询或内部错误。
   function userMessage(error) {
@@ -42,7 +58,7 @@
 
   async function getCloudApp() {
     if (!isCloud()) return null;
-    if (!window.cloudbase) throw new Error("CloudBase SDK没有加载成功");
+    if (!window.cloudbase) await loadCloudbaseSdk();
     if (!cloudApp) cloudApp = window.cloudbase.init({ env: config.envId, region: config.region || "ap-shanghai" });
     return cloudApp;
   }

@@ -26,7 +26,12 @@ await cp(path.join(projectDir, "student"), path.join(distDir, "student"), { recu
 await cp(path.join(projectDir, "admin"), path.join(distDir, "admin"), { recursive: true });
 await cp(path.join(projectDir, "shared"), path.join(distDir, "shared"), { recursive: true });
 
-const envId = String(process.env.CLOUDBASE_ENV_ID || "").trim();
+let envId = String(process.env.CLOUDBASE_ENV_ID || "").trim();
+// 防呆：忘改 .env.example 里的中文占位符时，不把垃圾环境 ID 构建成“云端模式”。
+if (/[\u4e00-\u9fff]/.test(envId)) {
+  console.warn("提示：CLOUDBASE_ENV_ID 仍是中文占位符，本次构建使用本机演示模式。正式部署前请在 .env.local 填写真实环境 ID。");
+  envId = "";
+}
 const region = String(process.env.CLOUDBASE_REGION || "ap-shanghai").trim();
 const adminUsername = String(process.env.CLOUDBASE_ADMIN_USERNAME || "counselor").trim();
 const configPath = path.join(distDir, "shared", "config.js");
