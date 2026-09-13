@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>新生住宿协同系统</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:28px;color:#17231e;background:radial-gradient(circle at 15% 8%,#dfeee4,transparent 30%),#eef2ee;font-family:"Microsoft YaHei UI","PingFang SC",sans-serif}.shell{width:min(930px,100%);overflow:hidden;border-radius:28px;background:#fff;box-shadow:0 24px 70px rgba(20,54,39,.12)}header{display:flex;justify-content:space-between;gap:20px;padding:34px 38px;color:#fff;background:linear-gradient(135deg,#173e31,#2f7658)}.brand{display:flex;align-items:center;gap:12px}.brand i{width:43px;height:43px;display:grid;place-items:center;border:1px solid rgba(255,255,255,.35);border-radius:14px;background:rgba(255,255,255,.1);font-family:Georgia,serif;font-size:20px;font-style:normal}.brand b,.brand small{display:block}.brand b{font-size:15px}.brand small{margin-top:4px;color:#b9d2c4;font-size:9px;letter-spacing:.12em}header>span{align-self:center;padding:7px 10px;border-radius:999px;color:#cfe2d7;background:rgba(255,255,255,.1);font-size:9px}main{padding:38px}.kicker{color:#34775b;font-size:9px;font-weight:900;letter-spacing:.18em}h1{margin:11px 0 8px;font-family:Georgia,"Songti SC",serif;font-size:30px}main>p{margin:0;color:#6f7d75;font-size:11px;line-height:1.7}.entries{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:28px}.entry{position:relative;overflow:hidden;display:flex;flex-direction:column;min-height:230px;padding:23px;border:1px solid #dfe7e2;border-radius:20px;color:inherit;text-decoration:none;background:#fbfcfb;transition:.2s}.entry:hover{border-color:#8eb39f;transform:translateY(-2px);box-shadow:0 16px 35px rgba(24,79,59,.08)}.entry i{width:42px;height:42px;display:grid;place-items:center;border-radius:13px;color:#fff;background:#34775b;font-family:Georgia,serif;font-size:17px;font-style:normal}.entry.admin i{background:#735b9c}.entry h2{margin:20px 0 7px;font-size:16px}.entry p{margin:0;color:#718078;font-size:9px;line-height:1.7}.entry b{margin-top:auto;color:#235c42;font-size:10px}.entry.admin b{color:#654d8d}.tip{display:flex;gap:10px;margin-top:20px;padding:14px;border-radius:14px;color:#6d786f;background:#f1f5f2;font-size:9px;line-height:1.6}.tip strong{color:#345747;white-space:nowrap}@media(max-width:620px){body{padding:0}.shell{min-height:100vh;border-radius:0}header,main{padding:24px}.entries{grid-template-columns:1fr}.entry{min-height:190px}header>span{display:none}h1{font-size:25px}}
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header><div class="brand"><i>寝</i><div><b>新生住宿协同系统</b><small>ONE SYSTEM · TWO ENTRANCES</small></div></div><span>一周试运行版</span></header>
+    <main>
+      <span class="kicker">请选择入口</span><h1>学生和辅导员，共用同一套住宿数据</h1><p>学生填写问卷并确认组队；辅导员通过独立账号查看进度、审核小组和导出分寝建议。</p>
+      <div class="entries">
+        <a class="entry" href="student/"><i>学</i><h2>学生入口</h2><p>核验班级、姓名和学号，填写生活习惯问卷，邀请并确认四人意向组。</p><b>进入学生端 →</b></a>
+        <a class="entry admin" href="admin/"><i>辅</i><h2>辅导员入口</h2><p>账号密码登录，管理工业机器人1—4班的问卷、组队和分寝结果。</p><b>进入工作台 →</b></a>
+      </div>
+      <div class="tip"><strong>隐私提示</strong><span>正式导入名单后，学生只能查看自己的提交状态和必要的组队信息，不能读取其他同学的完整问卷。</span></div>
+    </main>
+  </div>
+</body>
+</html>

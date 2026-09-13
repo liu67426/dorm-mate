@@ -1,0 +1,10 @@
+.env.local
+.cloudbase/
+.tcb/
+node_modules/
+cloudfunctions/*/node_modules/
+dist/
+qa/
+data/students.json
+data/students-*.json
+data/*.xlsx

@@ -1,0 +1,31 @@
+{
+  "$schema": "https://static.cloudbase.net/cli/cloudbaserc.schema.json",
+  "version": "2.1",
+  "envId": "{{env.CLOUDBASE_ENV_ID}}",
+  "region": "ap-shanghai",
+  "functions": [
+    {
+      "name": "dorm-api",
+      "dir": "cloudfunctions/dorm-api",
+      "type": "Event",
+      "handler": "index.main",
+      "runtime": "Nodejs20.19",
+      "timeout": 10,
+      "memorySize": 256,
+      "installDependency": true,
+      "envVariables": {
+        "ADMIN_UID": "{{env.ADMIN_UID}}"
+      }
+    }
+  ],
+  "hosting": [
+    {
+      "name": "dorm-web",
+      "root": ".",
+      "framework": "static",
+      "outputDir": "dist",
+      "buildCommand": "npm run build",
+      "deployPath": "/"
+    }
+  ]
+}
