@@ -47,28 +47,43 @@ CloudBase PostgreSQL（7 张业务表 + 安全存储过程 RPC，行级安全保
 - 所有写操作走 `SECURITY DEFINER` 存储过程并在事务中完成，关键动作写入审计表。
 - 网页与云函数共享同一份分寝核心代码（`shared/` → 构建时同步到 `cloudfunctions/`）。
 
-## 本地体验（演示数据）
+## 拿到代码后怎么用
+
+**路线 A：5 分钟本地体验（不注册任何账号）**
 
 ```bash
-npm install        # 只装开发依赖
-npm test           # 单元测试
-npm run build      # 构建静态网站到 dist/（未配置环境时自动为演示模式）
-npm run serve      # 需要 Python；或任意静态服务器，如 npx http-server dist
+npm run serve      # 需要 Python；或者 npx http-server -p 8770 .
 ```
 
-浏览器打开 `http://127.0.0.1:8770/`。未配置 `.env.local` 时系统运行在演示模式，使用内置示例数据，不会连接任何云端。
+浏览器打开 `http://127.0.0.1:8770/`：
 
-## 部署到腾讯云开发 CloudBase（免费档可跑）
+- 学生端：班级、填写码、姓名、学号**随便填**（例如 `工业机器人1班` / `01` / `张三` / `2026000100`），即可体验问卷、组队、邀请的完整流程。
+- 辅导员端：演示密码 `fdy2026`（只在本机演示模式有效，正式部署后以你自己设置的密码为准）。
+
+演示数据只保存在浏览器 localStorage 里，不连接任何服务器。`npm run build` 构建出的 `dist/` 在未配置环境时同样是演示模式。
+
+**路线 B：完整部署到腾讯云 CloudBase（免费档可跑）**
 
 详细步骤见 [`docs/CloudBase免费部署步骤.md`](docs/CloudBase免费部署步骤.md)，概要：
 
-1. 注册腾讯云并开通 CloudBase，创建环境，开启「匿名登录」和「用户名密码登录」。
-2. 复制 `.env.example` 为 `.env.local`，填入环境 ID、地域和辅导员的云开发 UID。
+1. 注册腾讯云并开通 CloudBase，创建环境，开启「匿名登录」和「用户名密码登录」，创建辅导员账号并记下其 UID。
+2. 复制 `.env.example` 为 `.env.local`，填入环境 ID、地域和辅导员 UID。
 3. `npm install` 安装 CloudBase CLI。
 4. `node scripts/apply-database.mjs` 建表（自动把 `.env.local` 中的 UID 注入 SQL）。
-5. `npx cloudbase framework deploy` 部署云函数与静态网站。
-6. `npm run build` 后重新部署静态托管，网页即切换为云端模式。
-7. 用 `scripts/set-counselor-password.ps1` 设置辅导员密码，按 `data/students-template.csv` 导入名单。
+5. 名单按 `data/students-template.csv` 整理为 `data/students.csv`，先用 `node scripts/import-students.mjs data/students.csv --dry-run` 试运行检查，确认无误后去掉该参数正式导入。
+6. `npm run build`，然后 `npx cloudbase framework deploy` 部署云函数与静态网站（或按部署文档用 tcb CLI 分步执行）。
+7. 用 `scripts/set-counselor-password.ps1` 设置辅导员密码。
+
+**部署后第一周怎么用**
+
+1. 辅导员把班级填写码告诉学生（如 1 班填写码 `01`）。
+2. 学生用手机打开学生端，通过名单核验后填写生活习惯问卷。
+3. 学生互相邀请组队，2–3 人确认后整体补位，4 人全确认锁定为固定组。
+4. 辅导员在工作台查看完成率，审批特殊床位需求。
+5. 一键生成分寝建议，检查强冲突提醒与未满员清单，可手动调整。
+6. 确认后发布结果，学生在学生端看到自己的寝室号与室友。
+
+业务规则（组队优先级、匹配权重、隐私红线）详见 [`docs/试点业务规则.md`](docs/试点业务规则.md)。
 
 ## 数据隐私
 

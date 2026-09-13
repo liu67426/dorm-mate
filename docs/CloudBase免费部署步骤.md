@@ -42,9 +42,33 @@ node node_modules/@cloudbase/cli/bin/tcb hosting deploy dist / -e 你的环境ID
 
 `apply-database.mjs` 会逐条创建或更新 PostgreSQL 数据表和安全函数，可重复运行；最后一条命令发布静态网站。
 
+```powershell
+npm install
+node scripts/apply-database.mjs
+node scripts/import-students.mjs data/students.csv
+npm run build
+node node_modules/@cloudbase/cli/bin/tcb hosting deploy dist / -e 你的环境ID
+```
+
+`apply-database.mjs` 会逐条创建或更新 PostgreSQL 数据表和安全函数，可重复运行；`import-students.mjs` 把学生名单导入数据库（见下节）；最后一条命令发布静态网站。
+
 ## 学生名单
 
-按 `data/students-template.csv` 整理四个班名单。正式名单给到后再生成导入文件；当前模板不能直接当作正式数据导入。系统会用班级、班号、姓名、学号四项核验身份。
+1. 按 `data/students-template.csv` 的表头整理名单（classId、className、classCode、studentId、name、gender），保存为 `data/students.csv`。系统会用班级、班号、姓名、学号四项核验学生身份，所以四项必须与名单完全一致。
+2. 先试运行检查名单有没有问题（不连接云端、不写数据）：
+
+```powershell
+node scripts/import-students.mjs data/students.csv --dry-run
+```
+
+3. 确认输出的人数、男女分布正确后，去掉 `--dry-run` 正式导入。
+
+导入规则：
+
+- 学号是唯一标识，重复学号会报错阻止导入；已导入过的学号再次执行会自动跳过，不会重复插入，也不影响学生已绑定的账号和已完成的问卷。
+- 名单录错个别信息时，在 CloudBase 控制台「数据库」中直接修改 `dorm_students` 表对应行即可；补录新学生重新执行本脚本。
+- `data/students.csv` 在 `.gitignore` 中，真实名单不会被提交到代码仓库。
+- 默认支持 4 个班（classId 1—4）。班级数不同时需要同步修改：`database/001_init.sql` 的班级约束、`database/002_formal_rooms.sql` 的寝室号规则、`cloudfunctions/dorm-api/index.js` 里的班级列表。
 
 ## 发布前检查
 
