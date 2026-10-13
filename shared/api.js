@@ -3,6 +3,10 @@
 
   const config = window.DORM_CONFIG || {};
   const MOCK_KEY = "dorm-networked-mock-v1";
+  function mockKey() {
+    const code = new URLSearchParams(location.search).get("school");
+    return code && window.DormSetup ? `${MOCK_KEY}:${window.DormSetup.schoolCode(code)}` : MOCK_KEY;
+  }
   let cloudApp;
   let sdkLoader = null;
 
@@ -48,12 +52,12 @@
   }
 
   function readMock() {
-    try { return JSON.parse(localStorage.getItem(MOCK_KEY)) || { surveys: [], invites: [] }; }
+    try { return JSON.parse(localStorage.getItem(mockKey())) || { surveys: [], invites: [] }; }
     catch { return { surveys: [], invites: [] }; }
   }
 
   function writeMock(data) {
-    localStorage.setItem(MOCK_KEY, JSON.stringify(data));
+    localStorage.setItem(mockKey(), JSON.stringify(data));
   }
 
   async function getCloudApp() {
@@ -105,7 +109,7 @@
 
   function normalizeIdentity(data = {}) {
     const originalCode = String(data.classCode ?? "").trim();
-    const classCode = /^[1-4]$/.test(originalCode) ? originalCode.padStart(2, "0") : originalCode;
+    const classCode = isCloud() && /^[1-4]$/.test(originalCode) ? originalCode.padStart(2, "0") : originalCode;
     return {
       ...data,
       className: String(data.className ?? "").trim(),
@@ -142,6 +146,11 @@
       data = await bindStudentIdentity(data);
       return rpc("dorm_submit_survey", { p_uid: "由数据库读取登录身份", p_answers: data });
     }
+    const code = new URLSearchParams(location.search).get("school");
+    const setup = code && window.DormSetup?.readSetup(localStorage, code);
+    if (!setup?.roster?.length) throw new Error("请先由辅导员完成该学校的名单导入");
+    const matched = setup.roster.some(item => item.studentId === data.studentId && item.name === data.name && item.className === data.className && item.classCode === data.classCode);
+    if (!matched) throw new Error("名单核验失败，请检查班级、填写码、姓名和学号");
     const mock = readMock();
     const record = { ...data, submittedAt: new Date().toISOString() };
     const index = mock.surveys.findIndex((item) => item.studentId === data.studentId);
@@ -263,7 +272,7 @@
     const allGroups = snapshot?.groups || [];
     const surveyMap = new Map(surveys.map((item) => [item.student_id, item]));
     const classMeta = {};
-    ["1", "2", "3", "4"].forEach((id) => {
+    [...new Set([...allStudents.map(item => item.class_id), ...allGroups.map(item => item.class_id)])].forEach((id) => {
       const list = allStudents.filter((item) => item.class_id === id);
       const rooms = (snapshot?.rooms || []).filter((item) => item.class_id === id && item.active !== false);
       classMeta[id] = {
@@ -459,5 +468,5 @@
     return rpc("dorm_admin_reset_student_binding", { p_student_id: String(studentId || "") });
   }
 
-  window.DormApi = { userMessage, isCloud, adminLogin, adminLogout, submitSurvey, recoverStudent, getStudentState, inviteStudent, respondInvite, requestJoinGroup, respondJoinRequest, getAdminDashboard, runAllocation, publishAllocation, resetStudentBinding };
+  window.DormApi = { userMessage, isCloud, adminLogin, adminLogout, submitSurvey, recoverStudent, getStudentState, inviteStudent, respondInvite, requestJoinGroup, respondJoinRequest, getAdminDashboard, runAllocation, publishAllocation, resetStudentBinding, getMockSurveys: () => readMock().surveys || [] };
 }());

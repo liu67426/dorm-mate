@@ -25,6 +25,10 @@ await cp(path.join(projectDir, "index.html"), path.join(distDir, "index.html"));
 await cp(path.join(projectDir, "student"), path.join(distDir, "student"), { recursive: true });
 await cp(path.join(projectDir, "admin"), path.join(distDir, "admin"), { recursive: true });
 await cp(path.join(projectDir, "shared"), path.join(distDir, "shared"), { recursive: true });
+await mkdir(path.join(distDir, "data"), { recursive: true });
+await cp(path.join(projectDir, "data", "students-template.csv"), path.join(distDir, "data", "students-template.csv"));
+await cp(path.join(projectDir, "data", "students-demo-template.csv"), path.join(distDir, "data", "students-demo-template.csv"));
+await cp(path.join(projectDir, "data", "rooms-template.csv"), path.join(distDir, "data", "rooms-template.csv"));
 
 let envId = String(process.env.CLOUDBASE_ENV_ID || "").trim();
 // 防呆：忘改 .env.example 里的中文占位符时，不把垃圾环境 ID 构建成“云端模式”。

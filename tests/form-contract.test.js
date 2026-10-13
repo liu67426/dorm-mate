@@ -52,10 +52,13 @@ test("联网版会显示正式联网与隐私用途说明", () => {
   assert.match(studentHtml, /id="environment-badge"/);
 });
 
-test("提交前会清理身份字段首尾空格并补齐两位填写码", async () => {
+test("演示问卷只允许当前学校已导入的学生提交", async () => {
   const storage = new Map();
+  const setup = require("../shared/setup-core.js");
+  storage.set("dorm-setup-v1:demo-school", JSON.stringify({ roster: [{ className: "示例一班", classCode: "A01", name: "示例同学", studentId: "DEMO001" }] }));
   const sandbox = {
-    window: { DORM_CONFIG: { mode: "mock", envId: "" } },
+    window: { DORM_CONFIG: { mode: "mock", envId: "" }, DormSetup: setup },
+    location: { search: "?school=demo-school" }, URLSearchParams,
     localStorage: {
       getItem(key) { return storage.get(key) || null; },
       setItem(key, value) { storage.set(key, value); }
@@ -66,11 +69,12 @@ test("提交前会清理身份字段首尾空格并补齐两位填写码", async
     console
   };
   vm.runInNewContext(apiSource, sandbox);
-  await sandbox.window.DormApi.submitSurvey({ className: " 工业机器人4班 ", classCode: "4", name: " 示例同学 ", studentId: " 2026000100 " });
-  const saved = JSON.parse(storage.get("dorm-networked-mock-v1")).surveys[0];
+  await assert.rejects(() => sandbox.window.DormApi.submitSurvey({ className: "示例一班", classCode: "A01", name: "陌生人", studentId: "DEMO001" }), /名单核验失败/);
+  await sandbox.window.DormApi.submitSurvey({ className: " 示例一班 ", classCode: "A01", name: " 示例同学 ", studentId: " DEMO001 " });
+  const saved = JSON.parse(storage.get("dorm-networked-mock-v1:demo-school")).surveys[0];
   assert.deepEqual(
     { className: saved.className, classCode: saved.classCode, name: saved.name, studentId: saved.studentId },
-    { className: "工业机器人4班", classCode: "04", name: "示例同学", studentId: "2026000100" }
+    { className: "示例一班", classCode: "A01", name: "示例同学", studentId: "DEMO001" }
   );
 });
 
@@ -114,11 +118,11 @@ test("辅导员可以直接查看特殊住宿情况和学生补充说明", () =>
   assert.match(adminSource, /openSpecialSituations/);
 });
 
-test("辅导员正式工作台不再显示名单尚未导入", () => {
-  assert.match(adminHtml, /正式名单已导入/);
+test("首次使用未导入名单时不得冒充已有正式名单", () => {
+  assert.match(adminHtml, /等待导入学生名单/);
   assert.match(adminHtml, /id="roster-notice-title"/);
-  assert.match(adminSource, /正式名单已导入.*summary\.total/);
-  assert.doesNotMatch(adminHtml, /正式名单尚未导入|>待导入</);
+  assert.match(adminSource, /summary\.total \? .*本机演示名单/);
+  assert.doesNotMatch(adminHtml, /正式名单已导入/);
 });
 
 test("分寝建议显示已填、已入寝、待处理和人数核对", () => {

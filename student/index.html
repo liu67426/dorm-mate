@@ -131,6 +131,7 @@
   <div class="toast" id="toast"></div>
   <script src="../shared/config.js"></script>
   <script src="../shared/group-core.js?v=20260904"></script>
+  <script src="../shared/setup-core.js"></script>
   <script src="../shared/api.js?v=20260906-optimal1"></script>
   <script>
     "use strict";
@@ -141,8 +142,25 @@
       document.getElementById("environment-description").textContent="仅允许辅导员导入名单内的同学提交；问卷提交后保存到云端，只用于室友匹配和住宿安排。";
       document.getElementById("environment-badge").textContent="已联网";
       document.getElementById("storage-description").textContent="草稿保存在本机，确认提交后上传云端";
-    }else{document.getElementById("recovery-box").hidden=true;document.getElementById("refresh-group").textContent="刷新组队状态";}
-    const KEY="roommate-questionnaire-standalone-demo-v1";
+    }else{
+      document.getElementById("recovery-box").hidden=true;
+      document.getElementById("refresh-group").textContent="刷新组队状态";
+      const code=new URLSearchParams(location.search).get("school");
+      let setup=null;
+      try { if(code) setup=window.DormSetup.readSetup(localStorage,code); } catch {}
+      const select=document.querySelector('[name="className"]');
+      select.replaceChildren(new Option("请选择", ""));
+      for(const item of setup?.classes||[]) select.add(new Option(item.className,item.className));
+      const codeInput=document.querySelector('[name="classCode"]');
+      codeInput.removeAttribute("pattern");
+      codeInput.removeAttribute("inputmode");
+      codeInput.maxLength=32;
+      codeInput.nextElementSibling.textContent="填写辅导员给你的班级填写码";
+      document.getElementById("environment-title").textContent=setup?.roster?.length?`${setup.schoolName} · 本机演示版`:"尚未准备演示名单";
+      document.getElementById("environment-description").textContent=setup?.roster?.length?"只在本浏览器核验演示名单，其他电脑无法读取；请勿填写真实个人信息。":"请辅导员先在工作台选择学校并导入演示名单，再通过专属链接进入。";
+    }
+    const schoolCode=new URLSearchParams(location.search).get("school")||"";
+    const KEY=`roommate-questionnaire-standalone-demo-v1:${schoolCode}`;
     const meta=[
       ["身份核验","姓名、学号与班级"],["睡眠作息","熄灯、闹钟与午睡"],["游戏娱乐","设备、时段与开麦"],["居住环境","声音、温度与气味"],
       ["卫生物品","清洁、洗衣与分享"],["学习社交","访客、安静与兴趣"],["沟通底线","矛盾处理与优先级"],["意向确认","意向室友与提交"]
@@ -288,7 +306,7 @@
     document.getElementById("submit-group").onclick=()=>{if(window.DormApi?.isCloud()||groupState.members.length!==4||groupState.submitted)return;groupState.submitted=true;saveGroup();renderGroup();showToast("完整四人组已提交辅导员审核")};
     document.getElementById("edit-again").onclick=()=>{document.getElementById("success").classList.remove("show");document.getElementById("group-center").classList.remove("show");document.getElementById("form-footer").style.display="flex";showStep(7)};
     function openCompletedWorkspace(){document.querySelectorAll(".step").forEach(s=>s.classList.remove("active"));document.querySelectorAll(".step-nav").forEach((item,index)=>{item.classList.toggle("active",index===7);item.classList.toggle("done",index<7)});document.getElementById("mobile-step-name").textContent="意向确认";document.getElementById("mobile-step-count").textContent="8 / 8";document.getElementById("mobile-progress-bar").style.width="100%";document.getElementById("form-footer").style.display="none";document.getElementById("success").classList.remove("show");document.getElementById("group-center").classList.add("show")}
-    async function restoreCompletedWorkspace(){if(!window.DormApi?.isCloud()){try{const mock=JSON.parse(localStorage.getItem("dorm-networked-mock-v1")||"null");if(mock?.surveys?.some(item=>item.studentId===value("studentId",""))){openCompletedWorkspace();renderGroup();}}catch{}return;}try{const state=await window.DormApi.getStudentState({studentId:value("studentId","")});if(!state.student||!state.surveyCompleted)return;openCompletedWorkspace();showCloudGroupLoading();applyCloudState(state,{notifyIfNew:true});window.scrollTo({top:0,behavior:"auto"})}catch(error){showToast(`云端进度恢复失败：${window.DormApi.userMessage(error)}`)}}
+    async function restoreCompletedWorkspace(){if(!window.DormApi?.isCloud()){try{if(window.DormApi.getMockSurveys().some(item=>item.studentId===value("studentId",""))){openCompletedWorkspace();renderGroup();}}catch{}return;}try{const state=await window.DormApi.getStudentState({studentId:value("studentId","")});if(!state.student||!state.surveyCompleted)return;openCompletedWorkspace();showCloudGroupLoading();applyCloudState(state,{notifyIfNew:true});window.scrollTo({top:0,behavior:"auto"})}catch(error){showToast(`云端进度恢复失败：${window.DormApi.userMessage(error)}`)}}
     restore();toggleGame();updateRanges();updateCompletion();showStep(0);restoreCompletedWorkspace();
   </script>
 </body>

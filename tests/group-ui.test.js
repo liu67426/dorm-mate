@@ -26,6 +26,7 @@ test("辅导员真实页面排除单人卡片，按确认数分类并使用真�
   const page=await pageFor("admin/index.html");
   const result=await page.evaluate(()=>{
     window.DormApi={isCloud:()=>true};
+    classMeta={"1":{name:"测试班",total:12,submitted:12,groups:1,review:0}};
     students=Array.from({length:12},(_,i)=>({id:String(i),name:"测试"+i,classId:"1"}));
     groups=[
       {id:"g-solo",classId:"1",memberIds:["0"],confirmedIds:["0"],score:null,status:"forming"},
@@ -49,6 +50,20 @@ test("辅导员真实页面排除单人卡片，按确认数分类并使用真�
   assert.match(result.all,/适配度尚未计算/);
   assert.match(result.all,/待复核/);
   assert.match(result.todo,/共2组/);
+  await page.close();
+});
+test("云端读取失败时清空旧学生数据并禁止生成分寝",async()=>{
+  const page=await pageFor("admin/index.html");
+  const state=await page.evaluate(async()=>{
+    classMeta={"1":{name:"旧演示班",total:1,submitted:1,groups:0,review:0}};
+    students=[{id:"old",name:"旧演示学生",classId:"1"}];
+    window.DormApi={isCloud:()=>true,getAdminDashboard:async()=>{throw new Error("网络失败")},userMessage:()=>"网络异常"};
+    await renderAll();
+    return {total:document.getElementById("metric-total").textContent,students:document.getElementById("student-table").textContent,disabled:document.getElementById("run-allocation").disabled};
+  });
+  assert.equal(state.total,"0");
+  assert.doesNotMatch(state.students,/旧演示学生/);
+  assert.equal(state.disabled,true);
   await page.close();
 });
 test("学生页面区分单人未组队、二三人已保存、四人全确认",async()=>{
