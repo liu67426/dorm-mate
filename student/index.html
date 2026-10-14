@@ -19,7 +19,7 @@
   <div class="app">
     <aside class="side">
       <div class="brand"><div class="mark">合</div><div><b>寝室合拍问卷</b><small>ROOMMATE FIT · STUDENT</small></div></div>
-      <div class="side-intro"><span>工业机器人1—4班</span><h2>把生活习惯说清楚，住得更舒服</h2><p>问卷预计6—8分钟。没有“好坏答案”，只比较生活方式是否合适。</p></div>
+      <div class="side-intro"><span>新生住宿问卷</span><h2>把生活习惯说清楚，住得更舒服</h2><p>问卷预计6—8分钟。没有“好坏答案”，只比较生活方式是否合适。</p></div>
       <nav class="steps" id="step-nav"></nav>
       <div class="privacy"><b>隐私说明</b><p>学生之间不展示完整答案；系统只用结构化选择做自动匹配，具体游戏名称、补充说明和特殊住宿需求不参与自动打分。兴趣类型仅作低权重参考。</p></div>
     </aside>
@@ -130,6 +130,7 @@
   </div>
   <div class="toast" id="toast"></div>
   <script src="../shared/config.js"></script>
+  <script src="../shared/tenant-core.js"></script>
   <script src="../shared/group-core.js?v=20260904"></script>
   <script src="../shared/setup-core.js"></script>
   <script src="../shared/api.js?v=20260906-optimal1"></script>
@@ -142,6 +143,22 @@
       document.getElementById("environment-description").textContent="仅允许辅导员导入名单内的同学提交；问卷提交后保存到云端，只用于室友匹配和住宿安排。";
       document.getElementById("environment-badge").textContent="已联网";
       document.getElementById("storage-description").textContent="草稿保存在本机，确认提交后上传云端";
+      if(Object.keys(window.DORM_CONFIG?.schools||{}).length){
+        const school=window.DormApi.schoolInfo();
+        const select=document.querySelector('[name="className"]');
+        select.replaceChildren(new Option(school?"正在读取班级…":"请先选择学校", ""));
+        const codeInput=document.querySelector('[name="classCode"]');
+        codeInput.removeAttribute("pattern");codeInput.removeAttribute("inputmode");codeInput.maxLength=32;
+        codeInput.nextElementSibling.textContent="填写辅导员给你的班级填写码";
+        document.getElementById("environment-title").textContent=school?`${school.name} · 联网版`:"尚未选择学校";
+        if(school) window.DormApi.getPublicClasses().then(classes=>{
+          select.replaceChildren(new Option("请选择", ""));
+          for(const item of classes||[]) select.add(new Option(item.className,item.className));
+          if(!classes?.length) document.getElementById("environment-description").textContent="本校尚未导入名单，请联系辅导员完成首次设置。";
+          restore();
+        }).catch(()=>{select.replaceChildren(new Option("班级读取失败，请刷新", ""));document.getElementById("environment-description").textContent="暂时无法读取本校班级，请刷新后重试。";});
+        else document.getElementById("environment-description").textContent="请返回网站首页选择学校。";
+      }
     }else{
       document.getElementById("recovery-box").hidden=true;
       document.getElementById("refresh-group").textContent="刷新组队状态";

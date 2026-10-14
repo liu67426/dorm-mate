@@ -14,6 +14,7 @@ catch { currentSchool = ""; }
 let setupState = null;
 let stagedRoster = null;
 let stagedRooms = null;
+let cloudRoster = null;
 
 let selectedClass = "all";
 let groupFilter = "all";
@@ -42,13 +43,21 @@ function updateClassPicker() {
 
 function updateSetupView() {
   if (window.DormApi?.isCloud()) {
-    document.getElementById("setup-status").textContent = "当前云端版仍是单校试点；网页导入名单和多校隔离尚未接入，请勿在此上传真实名单。";
-    document.getElementById("setup-warning").textContent = "云端版目前沿用单校试点数据库；不同学校不可共用这一环境，名单仍须由部署人员按现有导入脚本处理。";
+    const school = window.DormApi.schoolInfo?.() || null;
+    const initialized = students.length > 0;
+    document.getElementById("setup-status").textContent = initialized ? `当前环境已有${students.length}名学生；为保护已使用的数据，网页禁止再次初始化。` : cloudRoster ? "名单已核对，请选择寝室文件；最后一步会一次性写入云端。" : "当前环境尚未导入学生名单，请先上传并核对名单。";
+    document.getElementById("setup-warning").textContent = school ? `当前学校：${school.name}。首次初始化会将名单和寝室一次性写入该校独立环境。请先核对学校及文件；已有学生数据的环境不能再次初始化。` : "未选择已开通的学校，请返回网站首页选择。";
+    document.getElementById("school-name").value = school?.name || "";
+    document.getElementById("school-code").value = school?.code || "";
     document.getElementById("school-name").disabled = true;
     document.getElementById("school-code").disabled = true;
     document.getElementById("select-school").disabled = true;
-    document.getElementById("roster-file").disabled = true;
-    document.getElementById("rooms-file").disabled = true;
+    document.getElementById("roster-file").disabled = !school || initialized;
+    document.getElementById("rooms-file").disabled = !school || initialized || !cloudRoster;
+    document.getElementById("roster-preview").textContent = initialized ? "已完成首次初始化" : cloudRoster ? `已核对${cloudRoster.records.length}名学生、${cloudRoster.classes.length}个班。` : "尚未选择名单文件";
+    document.getElementById("rooms-preview").textContent = initialized ? "寝室已由云端保存" : "请先核对学生名单";
+    document.getElementById("import-roster").textContent = "名单核对通过，继续寝室";
+    document.getElementById("import-rooms").textContent = "确认启用本校数据";
     return;
   }
   document.getElementById("school-name").value = setupState?.schoolName || document.getElementById("school-name").value;
@@ -113,13 +122,23 @@ document.getElementById("roster-file").addEventListener("change", async event =>
     if (!file) return;
     if (file.size > 2 * 1024 * 1024) throw new Error("名单文件不能超过2MB");
     stagedRoster = window.DormSetup.validateRoster(await file.text());
-    document.getElementById("roster-preview").textContent = `检查通过：${stagedRoster.records.length}名学生、${stagedRoster.classes.length}个班。确认导入会替换该学校旧名单和问卷。`;
+    document.getElementById("roster-preview").textContent = `检查通过：${stagedRoster.records.length}名学生、${stagedRoster.classes.length}个班。${window.DormApi?.isCloud() ? "继续核对寝室后，才能一次性写入本校云环境。" : "确认导入会替换该学校旧名单和问卷。"}`;
     document.getElementById("import-roster").disabled = false;
   } catch (error) { document.getElementById("roster-preview").textContent = error.message; }
 });
 
 document.getElementById("import-roster").addEventListener("click", () => {
-  if (!stagedRoster || !setupState || !currentSchool) return;
+  if (!stagedRoster) return;
+  if (window.DormApi?.isCloud()) {
+    if (students.length || !window.DormApi.schoolInfo()) return;
+    cloudRoster = stagedRoster;
+    stagedRoster = null;
+    document.getElementById("import-roster").disabled = true;
+    updateSetupView();
+    showToast("名单已核对，请继续导入寝室");
+    return;
+  }
+  if (!setupState || !currentSchool) return;
   if (setupState.roster.length && !confirm("重新导入会清除该学校本机演示问卷和寝室，请确认。")) return;
   setupState.roster = stagedRoster.records;
   setupState.classes = stagedRoster.classes;
@@ -141,14 +160,33 @@ document.getElementById("rooms-file").addEventListener("change", async event => 
     const file = event.target.files[0];
     if (!file) return;
     if (file.size > 2 * 1024 * 1024) throw new Error("寝室文件不能超过2MB");
-    stagedRooms = window.DormSetup.validateRooms(await file.text(), setupState.classes);
+    stagedRooms = window.DormSetup.validateRooms(await file.text(), window.DormApi?.isCloud() ? cloudRoster?.classes || [] : setupState.classes);
     document.getElementById("rooms-preview").textContent = `检查通过：${stagedRooms.length}间寝室。`;
     document.getElementById("import-rooms").disabled = false;
   } catch (error) { document.getElementById("rooms-preview").textContent = error.message; }
 });
 
-document.getElementById("import-rooms").addEventListener("click", () => {
-  if (!stagedRooms || !setupState) return;
+document.getElementById("import-rooms").addEventListener("click", async () => {
+  if (!stagedRooms) return;
+  if (window.DormApi?.isCloud()) {
+    if (!cloudRoster || students.length) return;
+    if (!confirm(`确定为${window.DormApi.schoolInfo().name}首次导入${cloudRoster.records.length}名学生和${stagedRooms.length}间寝室吗？`)) return;
+    const button = document.getElementById("import-rooms");
+    button.disabled = true;
+    button.textContent = "正在写入云端…";
+    try {
+      const expectedCount = cloudRoster.records.length;
+      await window.DormApi.initializeSchool(cloudRoster.records, stagedRooms);
+      cloudRoster = null; stagedRooms = null;
+      const loaded = await renderAll();
+      showToast(loaded && students.length === expectedCount ? "名单和寝室已写入本校云环境" : "云端已接收导入，但读取核对未完成；请刷新工作台确认");
+    } catch (error) {
+      button.disabled = false;
+      showToast(`导入失败：${window.DormApi.userMessage(error)}`);
+    } finally { button.textContent = "确认启用本校数据"; }
+    return;
+  }
+  if (!setupState) return;
   setupState.rooms = stagedRooms;
   window.DormSetup.saveSetup(localStorage, currentSchool, setupState);
   stagedRooms = null;
@@ -166,21 +204,22 @@ function showToast(message) {
   toastTimer = setTimeout(() => toast.classList.remove("show"), 2400);
 }
 
+function authKey() { return window.DormApi?.isCloud() ? `${AUTH_KEY}:${window.DormApi.schoolInfo()?.code || "unselected"}` : AUTH_KEY; }
 function validSession() {
-  const timestamp = Number(sessionStorage.getItem(AUTH_KEY));
+  const timestamp = Number(sessionStorage.getItem(authKey()));
   return timestamp > 0 && Date.now() - timestamp < SESSION_LENGTH;
 }
 
 async function openWorkspace() {
-  sessionStorage.setItem(AUTH_KEY, String(Date.now()));
+  sessionStorage.setItem(authKey(), String(Date.now()));
   loginView.hidden = true;
   app.hidden = false;
   await renderAll();
-  if (!window.DormApi?.isCloud() && !setupState?.roster?.length) activateView("setup");
+  if ((!window.DormApi?.isCloud() && !setupState?.roster?.length) || (window.DormApi?.isCloud() && !students.length)) activateView("setup");
 }
 
 function closeWorkspace(message = "已安全退出工作台") {
-  sessionStorage.removeItem(AUTH_KEY);
+  sessionStorage.removeItem(authKey());
   app.hidden = true;
   loginView.hidden = false;
   passwordInput.value = "";
@@ -208,6 +247,10 @@ function updateLockState() {
 
 loginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (window.DormApi?.isCloud() && !window.DormApi.schoolInfo?.()) {
+    loginError.textContent = "请先返回网站首页选择已开通的学校。";
+    return;
+  }
   if (updateLockState()) return;
   loginButton.disabled = true;
   loginButton.firstChild.textContent = "正在验证 ";
@@ -249,7 +292,7 @@ document.getElementById("logout").addEventListener("click", () => closeWorkspace
 app.addEventListener("click", () => {
   // 工作台已关闭时（含刚点完退出的冒泡），不允许续期会话，否则退出后刷新会免密进入。
   if (app.hidden) return;
-  sessionStorage.setItem(AUTH_KEY, String(Date.now()));
+  sessionStorage.setItem(authKey(), String(Date.now()));
 });
 
 const pageTitles = { setup: "首次设置", overview: "工作台总览", surveys: "问卷管理", groups: "组队审核", allocation: "分寝建议" };
@@ -530,6 +573,7 @@ document.getElementById("export-rooms").addEventListener("click", () => {
 });
 
 async function renderAll() {
+  let loaded = true;
   if (window.DormApi?.isCloud()) {
     try {
       const remote = await window.DormApi.getAdminDashboard(selectedClass);
@@ -541,6 +585,7 @@ async function renderAll() {
       updateSetupView();
       document.getElementById("run-allocation").disabled = !students.length;
     } catch (error) {
+      loaded = false;
       classMeta = {}; students = []; groups = [];
       updateClassPicker();
       updateSetupView();
@@ -551,6 +596,7 @@ async function renderAll() {
   renderOverview();
   renderStudents();
   renderGroups();
+  return loaded;
 }
 
 if (validSession()) openWorkspace();

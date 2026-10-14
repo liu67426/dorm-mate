@@ -2,6 +2,9 @@
   "use strict";
 
   const config = window.DORM_CONFIG || {};
+  const tenant = () => window.DormTenant?.resolve(config, typeof location === "undefined" ? "" : location.search)
+    || (config.mode === "cloud" && !Object.keys(config.schools || {}).length && config.envId
+      ? { code: "", name: "单校试点", envId: config.envId, region: config.region, adminUsername: config.adminUsername } : null);
   const MOCK_KEY = "dorm-networked-mock-v1";
   function mockKey() {
     const code = new URLSearchParams(location.search).get("school");
@@ -30,6 +33,8 @@
     const message = String(error?.message || error || "");
     const rules = [
       [/permission denied|forbidden|无权|权限不足/i, "当前操作暂时无法完成，请联系辅导员检查访问权限。"],
+      [/床位不足/, "名单人数超过导入的寝室床位，请补充寝室后重试。"],
+      [/已有学生或分寝数据/, "该校已有数据，不能重复首次导入；请联系部署人员处理补录。"],
       [/请先登录|unauthenticated|unauthorized|token.*expired|登录.*过期/i, "登录状态已失效，请重新登录或完成身份核验后再试。"],
       [/邀请不存在或已经处理/, "这条邀请已处理或已失效，请刷新组队状态。"],
       [/加入申请不存在或已经处理/, "这条加入申请已处理或已失效，请刷新组队状态。"],
@@ -48,7 +53,7 @@
   }
 
   function isCloud() {
-    return config.mode === "cloud" && Boolean(config.envId);
+    return config.mode === "cloud";
   }
 
   function readMock() {
@@ -62,8 +67,10 @@
 
   async function getCloudApp() {
     if (!isCloud()) return null;
+    const school = tenant();
+    if (!school) throw new Error("请先选择已开通的学校");
     if (!window.cloudbase) await loadCloudbaseSdk();
-    if (!cloudApp) cloudApp = window.cloudbase.init({ env: config.envId, region: config.region || "ap-shanghai" });
+    if (!cloudApp) cloudApp = window.cloudbase.init({ env: school.envId, region: school.region || "ap-shanghai" });
     return cloudApp;
   }
 
@@ -95,7 +102,7 @@
     if (!isCloud()) return password === "fdy2026";
     const auth = await getAuth();
     if (typeof auth.signOut === "function") await auth.signOut({ clearStorage: true }).catch(() => {});
-    const result = await auth.signInWithPassword({ username: config.adminUsername || "counselor", password });
+    const result = await auth.signInWithPassword({ username: tenant().adminUsername || "counselor", password });
     if (result?.error) throw new Error(result.error.message || "账号或密码错误");
     await rpc("dorm_admin_snapshot", { p_class_id: "all" });
     return true;
@@ -109,7 +116,7 @@
 
   function normalizeIdentity(data = {}) {
     const originalCode = String(data.classCode ?? "").trim();
-    const classCode = isCloud() && /^[1-4]$/.test(originalCode) ? originalCode.padStart(2, "0") : originalCode;
+    const classCode = isCloud() && !Object.keys(config.schools || {}).length && /^[1-4]$/.test(originalCode) ? originalCode.padStart(2, "0") : originalCode;
     return {
       ...data,
       className: String(data.className ?? "").trim(),
@@ -264,6 +271,17 @@
     return rpc("dorm_admin_snapshot", { p_class_id: "all" });
   }
 
+  async function getPublicClasses() {
+    if (!isCloud()) return [];
+    await ensureAnonymous();
+    return rpc("dorm_public_classes", {});
+  }
+
+  async function initializeSchool(roster, rooms) {
+    if (!isCloud() || !tenant()) throw new Error("请先选择已开通的学校");
+    return rpc("dorm_admin_initialize", { p_students: roster, p_rooms: rooms });
+  }
+
   async function getAdminDashboard(classId) {
     if (!isCloud()) return null;
     const snapshot = await getSnapshot();
@@ -276,7 +294,7 @@
       const list = allStudents.filter((item) => item.class_id === id);
       const rooms = (snapshot?.rooms || []).filter((item) => item.class_id === id && item.active !== false);
       classMeta[id] = {
-        name: list[0]?.class_name || `工业机器人${id}班`,
+        name: list[0]?.class_name || `班级${id}`,
         total: list.length,
         male: list.filter((item) => item.gender === "男").length,
         female: list.filter((item) => item.gender === "女").length,
@@ -400,7 +418,7 @@
     const allGroups = snapshot?.groups || [];
     const assignmentMap = new Map((snapshot?.assignments || []).map(assignment => [assignment.student_id, assignment.room_number]));
     const surveyMap = new Map(surveys.map((survey) => [survey.student_id, survey]));
-    const wantedClasses = classId && classId !== "all" ? [classId] : ["1", "2", "3", "4"];
+    const wantedClasses = classId && classId !== "all" ? [classId] : [...new Set(allStudents.map(student => student.class_id))];
     const eligible = allStudents.filter((student) => wantedClasses.includes(student.class_id) && student.survey_completed);
     const matchable = eligible.filter((student) => ["男", "女"].includes(student.gender));
     const studentMap = new Map(eligible.map((student) => [student.id, featureStudent(student, surveyMap.get(student.id))]));
@@ -430,7 +448,9 @@
     });
 
     const allocation = window.DormAllocation.allocateAll(units);
-    const inventory = (snapshot?.rooms || []).map((room) => ({ roomNumber: room.room_number, classId: room.class_id, gender: room.gender, capacity: room.capacity, active: room.active }));
+    // 单班运行看不到其他班当前对机动寝室的占用，因此只在“全部班级”运行时使用机动寝室。
+    const inventory = (snapshot?.rooms || []).filter(room => classId === "all" || !classId || room.class_id !== "shared")
+      .map((room) => ({ roomNumber: room.room_number, classId: room.class_id, gender: room.gender, capacity: room.capacity, active: room.active }));
     const numbered = window.DormAllocation.assignRoomNumbers(allocation, inventory);
     const rooms = numbered.rooms.map((room) => ({
         classId: room.classId,
@@ -468,5 +488,5 @@
     return rpc("dorm_admin_reset_student_binding", { p_student_id: String(studentId || "") });
   }
 
-  window.DormApi = { userMessage, isCloud, adminLogin, adminLogout, submitSurvey, recoverStudent, getStudentState, inviteStudent, respondInvite, requestJoinGroup, respondJoinRequest, getAdminDashboard, runAllocation, publishAllocation, resetStudentBinding, getMockSurveys: () => readMock().surveys || [] };
+  window.DormApi = { userMessage, isCloud, schoolInfo: tenant, adminLogin, adminLogout, submitSurvey, recoverStudent, getStudentState, getPublicClasses, initializeSchool, inviteStudent, respondInvite, requestJoinGroup, respondJoinRequest, getAdminDashboard, runAllocation, publishAllocation, resetStudentBinding, getMockSurveys: () => readMock().surveys || [] };
 }());
