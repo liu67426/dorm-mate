@@ -380,7 +380,7 @@
     });
     const sharedFemaleRooms = pools.get("shared|女") || [];
     while (sharedFemaleRooms.length) {
-      const candidates = pending.filter((student) => student.gender === "女" && ["1", "2", "3", "4"].includes(String(student.classId)));
+      const candidates = pending.filter((student) => student.gender === "女" && String(student.classId) !== "shared");
       if (!candidates.length) break;
       const inventoryRoom = sharedFemaleRooms.shift();
       // 备用寝室也只能整组补位，不能从三人组或两人组中截取一部分。

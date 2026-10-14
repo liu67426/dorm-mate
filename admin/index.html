@@ -13,7 +13,7 @@
       <div class="art-brand"><span>寝</span><b>新生住宿协同系统</b></div>
       <div class="art-copy">
         <p>COUNSELOR WORKSPACE</p>
-        <h1>让四个班的问卷、<br>组队与分寝清楚可查。</h1>
+        <h1>让各班的问卷、<br>组队与分寝清楚可查。</h1>
         <div class="art-features"><span>01 <b>问卷进度</b></span><span>02 <b>组队审核</b></span><span>03 <b>分寝建议</b></span></div>
       </div>
       <div class="art-note">正式数据仅供已授权辅导员查看</div>
@@ -22,7 +22,7 @@
       <form class="login-card" id="login-form">
         <span class="login-kicker">仅限辅导员进入</span>
         <h2>欢迎回来</h2>
-        <p>输入工作台密码，查看四个班的住宿收集情况。</p>
+        <p>输入工作台密码，查看住宿收集情况。</p>
         <label for="password">工作台密码</label>
         <div class="password-field">
           <input id="password" name="password" type="password" autocomplete="current-password" placeholder="请输入密码" required>
@@ -39,9 +39,10 @@
   <div class="app" id="app" hidden>
     <aside class="sidebar">
       <div class="brand"><span>寝</span><div><b>住宿协同系统</b><small>辅导员工作台</small></div></div>
-      <div class="demo-badge"><i></i> 四班正式工作区</div>
+      <div class="demo-badge"><i></i> 住宿管理工作区</div>
       <nav>
-        <button class="nav-button active" data-view="overview"><i>⌂</i><span><b>工作台总览</b><small>四班整体进度</small></span></button>
+        <button class="nav-button" data-view="setup"><i>＋</i><span><b>首次设置</b><small>名单与寝室</small></span></button>
+        <button class="nav-button active" data-view="overview"><i>⌂</i><span><b>工作台总览</b><small>班级整体进度</small></span></button>
         <button class="nav-button" data-view="surveys"><i>▤</i><span><b>问卷管理</b><small>完成与待填写</small></span></button>
         <button class="nav-button" data-view="groups"><i>♙</i><span><b>组队审核</b><small>两人、三人与四人组</small></span></button>
         <button class="nav-button" data-view="allocation"><i>▦</i><span><b>分寝建议</b><small>生成与导出</small></span></button>
@@ -53,14 +54,25 @@
       <header class="topbar">
         <div><span class="eyebrow">COUNSELOR WORKSPACE</span><h1 id="page-title">工作台总览</h1></div>
         <div class="top-actions">
-          <label class="class-picker">查看范围<select id="class-select"><option value="all">全部4个班</option><option value="1">工业机器人1班</option><option value="2">工业机器人2班</option><option value="3">工业机器人3班</option><option value="4">工业机器人4班</option></select></label>
+          <label class="class-picker">查看范围<select id="class-select"><option value="all">全部班级</option></select></label>
           <div class="account"><span>辅</span><div><b>辅导员</b><small>住宿管理权限</small></div></div>
           <button class="logout" id="logout" type="button">退出</button>
         </div>
       </header>
 
+      <section class="view" id="view-setup">
+        <div class="section-hero"><div><span class="eyebrow">FIRST USE</span><h2>先准备名单，再开放问卷</h2><p>首次使用按顺序填写学校信息、导入学生名单和可用寝室。系统会先检查文件，确认后才保存。</p></div></div>
+        <div class="setup-identity"><label>学校名称<input id="school-name" placeholder="例如：某某职业学院" maxlength="80"></label><label>学校代号<input id="school-code" placeholder="例如：my-college" maxlength="32"><small>3—32位英文、数字、下划线或横线；同一浏览器中以此区分演示数据。</small></label><button class="primary" id="select-school" type="button">进入这所学校</button></div>
+        <p class="setup-warning" id="setup-warning">本机演示数据只保存在当前浏览器，其他电脑看不到。正式多校共用网站需要独立账号与服务端隔离，当前请勿上传真实学生名单。</p>
+        <div class="setup-steps">
+          <article class="setup-card"><span class="setup-number">01</span><h3>导入学生名单</h3><p>包含班级编号、班级名称、填写码、学号、姓名和性别。<a href="../data/students-demo-template.csv" download>下载名单模板</a></p><input id="roster-file" type="file" accept=".csv,text/csv" disabled><div class="setup-preview" id="roster-preview">请先选择学校</div><button class="primary" id="import-roster" type="button" disabled>确认导入名单</button></article>
+          <article class="setup-card"><span class="setup-number">02</span><h3>导入可用寝室</h3><p>名单导入后，再填写寝室号、所属班级、性别和容量。当前分寝规则支持四人间。<a href="../data/rooms-template.csv" download>下载寝室模板</a></p><input id="rooms-file" type="file" accept=".csv,text/csv" disabled><div class="setup-preview" id="rooms-preview">请先导入学生名单</div><button class="primary" id="import-rooms" type="button" disabled>确认导入寝室</button></article>
+        </div>
+        <p class="setup-note" id="setup-status">尚未导入名单，不能生成分寝建议。</p>
+      </section>
+
       <section class="view active" id="view-overview">
-        <div class="notice"><span>✓</span><div><b id="roster-notice-title">正式名单已导入</b><p id="roster-notice-text">系统按班级和性别严格分开匹配；学生之间不展示完整问卷。</p></div><em id="roster-notice-badge">正式运行</em></div>
+        <div class="notice"><span>○</span><div><b id="roster-notice-title">等待导入学生名单</b><p id="roster-notice-text">请在“首次设置”中导入名单。</p></div><em id="roster-notice-badge">本机演示</em></div>
         <div class="metrics">
           <article class="metric green"><span>学生总数</span><b id="metric-total">—</b><small>当前查看范围</small></article>
           <article class="metric blue"><span>已完成问卷</span><b id="metric-submitted">—</b><small id="metric-rate">完成率 —</small></article>
@@ -68,7 +80,7 @@
           <article class="metric amber actionable" id="open-special" role="button" tabindex="0" title="点击查看特殊住宿情况"><span>特殊需求待确认</span><b id="metric-review">—</b><small>点击查看下铺、无障碍等需求</small></article>
         </div>
         <div class="overview-grid">
-          <article class="panel class-panel"><div class="panel-head"><div><span>01</span><h2>四个班收集进度</h2></div><small>点击班级即可单独查看</small></div><div class="class-cards" id="class-cards"></div></article>
+          <article class="panel class-panel"><div class="panel-head"><div><span>01</span><h2>班级收集进度</h2></div><small>点击班级即可单独查看</small></div><div class="class-cards" id="class-cards"></div></article>
           <article class="panel"><div class="panel-head"><div><span>02</span><h2>今天优先处理</h2></div></div><div class="todo-list" id="todo-list"></div></article>
         </div>
       </section>
@@ -87,7 +99,7 @@
         <div class="section-hero"><div><span class="eyebrow">DORMITORY SUGGESTIONS</span><h2>分寝建议</h2><p>固定四人组优先保留，其他同学按班级、性别与生活习惯生成建议。</p></div><div class="hero-actions"><button class="secondary" id="export-rooms" type="button" disabled>导出分寝 CSV</button><button class="secondary" id="publish-allocation" type="button" disabled>确认发布</button><button class="primary" id="run-allocation" type="button">生成分寝建议</button></div></div>
         <div class="allocation-rule"><span>i</span><p><b>发布前请核对。</b> 男、女生严格分开；系统使用作息、游戏与声音、空调、卫生、社交、住宿底线等结构化答案，并按每名学生最看重的前三项加权。不同组队之间严格尊重双方填写的烟味接受范围；原确认组内部若已有冲突，系统保留组队并显示复核提醒。具体游戏名称、补充说明和特殊床位需求不参与自动打分，只供辅导员人工参考。发布后学生可以查看自己的寝室号和同寝室成员。已入寝人数与待处理人数之和应等于已完成问卷人数。</p></div>
         <div class="allocation-counts" id="allocation-counts" hidden></div>
-        <div class="allocation-empty" id="allocation-empty"><span>▦</span><h3>尚未生成分寝建议</h3><p>选择上方查看范围，然后点击“生成分寝建议”。选择全部4个班时，各班仍会独立分寝。</p></div>
+        <div class="allocation-empty" id="allocation-empty"><span>▦</span><h3>尚未生成分寝建议</h3><p>先导入名单和寝室，再收集问卷。选择全部班级时，各班仍会独立分寝。</p></div>
         <div class="room-grid" id="room-grid"></div>
         <div class="pending-panel" id="pending-panel" hidden><h3>待辅导员处理</h3><div id="pending-list"></div></div>
       </section>
@@ -95,8 +107,10 @@
   </div>
   <div class="toast" id="toast"></div>
   <script src="../shared/config.js"></script>
+  <script src="../shared/tenant-core.js"></script>
   <script src="../shared/allocation-core.js?v=20260906-optimal1"></script>
   <script src="../shared/group-core.js?v=20260904"></script>
+  <script src="../shared/setup-core.js"></script>
   <script src="../shared/api.js?v=20260906-optimal1"></script>
   <script src="app.js?v=20260906-optimal1"></script>
 </body>

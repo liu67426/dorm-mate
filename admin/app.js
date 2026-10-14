@@ -5,50 +5,16 @@ const FAIL_KEY = "counselor-demo-fails-v1";
 const LOCK_KEY = "counselor-demo-lock-v1";
 const SESSION_LENGTH = 15 * 60 * 1000;
 
-let classMeta = {
-  "1": { name: "工业机器人1班", total: 42, submitted: 36, groups: 5, review: 3 },
-  "2": { name: "工业机器人2班", total: 41, submitted: 34, groups: 4, review: 2 },
-  "3": { name: "工业机器人3班", total: 43, submitted: 37, groups: 6, review: 3 },
-  "4": { name: "工业机器人4班", total: 42, submitted: 35, groups: 5, review: 2 }
-};
-
-const habits = [
-  ["22:50休息 · 06:40起床", "偶尔游戏 · 全程耳机", "不抽烟", "作息稳定"],
-  ["23:20休息 · 07:00起床", "经常游戏 · 偶尔开麦", "不抽烟", "机械键盘"],
-  ["22:30休息 · 06:30起床", "基本不玩游戏", "不抽烟", "睡眠较浅"],
-  ["00:10休息 · 07:20起床", "经常游戏 · 全程耳机", "不抽烟", "晚睡型"],
-  ["23:00休息 · 06:50起床", "偶尔游戏 · 不开麦", "不抽烟", "卫生主动"],
-  ["23:40休息 · 07:10起床", "偶尔游戏 · 偶尔开麦", "不抽烟", "空调适中"],
-  ["22:40休息 · 06:40起床", "基本不玩游戏", "不抽烟", "安静型"],
-  ["00:30休息 · 07:30起床", "经常游戏 · 经常开麦", "不抽烟", "经常开麦"],
-  ["23:10休息 · 06:50起床", "偶尔游戏 · 全程耳机", "只在宿舍外抽烟", "吸烟习惯已填写"],
-  ["23:50休息 · 07:00起床", "经常游戏 · 偶尔开麦", "不抽烟", "卫生一般"],
-  ["未填写", "未填写", "未填写", "等待问卷"],
-  ["未填写", "未填写", "未填写", "等待问卷"],
-  ["23:00休息 · 06:40起床", "偶尔游戏 · 全程耳机", "不抽烟", "卫生主动"],
-  ["23:15休息 · 06:55起床", "偶尔游戏 · 不开麦", "不抽烟", "安静型"],
-  ["22:45休息 · 06:35起床", "基本不玩游戏", "不抽烟", "作息稳定"],
-  ["23:30休息 · 07:00起床", "偶尔游戏 · 全程耳机", "不抽烟", "沟通直接"]
-];
-
-let students = Object.keys(classMeta).flatMap((classId) => habits.map((habit, index) => {
-  const number = index + 1;
-  return {
-    id: `${classId}-${number}`,
-    classId,
-    name: `示例学生${classId}-${String(number).padStart(2, "0")}`,
-    sid: `2026****${classId}${String(number).padStart(2, "0")}`,
-    status: number === 11 || number === 12 ? "pending" : number >= 8 && number <= 10 ? "review" : "completed",
-    sleep: habit[0], game: habit[1], smoking: habit[2], tag: habit[3]
-  };
-}));
-
-let groups = Object.keys(classMeta).flatMap((classId) => [
-  { id: `${classId}-A`, classId, memberIds: [1, 2, 3, 4].map((n) => `${classId}-${n}`), score: 91 },
-  { id: `${classId}-B`, classId, memberIds: [5, 6, 7].map((n) => `${classId}-${n}`), score: 86 },
-  { id: `${classId}-C`, classId, memberIds: [8, 9].map((n) => `${classId}-${n}`), score: 79 },
-  { id: `${classId}-D`, classId, memberIds: [13, 14, 15, 16].map((n) => `${classId}-${n}`), score: 94 }
-]).map(group => ({...group, confirmedIds:[...group.memberIds], status:group.memberIds.length === 4 ? "complete" : "forming"}));
+let classMeta = {};
+let students = [];
+let groups = [];
+let currentSchool = new URLSearchParams(location.search).get("school") || "";
+try { if (currentSchool) currentSchool = window.DormSetup.schoolCode(currentSchool); }
+catch { currentSchool = ""; }
+let setupState = null;
+let stagedRoster = null;
+let stagedRooms = null;
+let cloudRoster = null;
 
 let selectedClass = "all";
 let groupFilter = "all";
@@ -68,6 +34,168 @@ function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[character]));
 }
 
+function updateClassPicker() {
+  const picker = document.getElementById("class-select");
+  picker.innerHTML = '<option value="all">全部班级</option>' + Object.entries(classMeta).map(([id, item]) => `<option value="${escapeHtml(id)}">${escapeHtml(item.name)}</option>`).join("");
+  if (selectedClass !== "all" && !classMeta[selectedClass]) selectedClass = "all";
+  picker.value = selectedClass;
+}
+
+function updateSetupView() {
+  if (window.DormApi?.isCloud()) {
+    const school = window.DormApi.schoolInfo?.() || null;
+    const initialized = students.length > 0;
+    document.getElementById("setup-status").textContent = initialized ? `当前环境已有${students.length}名学生；为保护已使用的数据，网页禁止再次初始化。` : cloudRoster ? "名单已核对，请选择寝室文件；最后一步会一次性写入云端。" : "当前环境尚未导入学生名单，请先上传并核对名单。";
+    document.getElementById("setup-warning").textContent = school ? `当前学校：${school.name}。首次初始化会将名单和寝室一次性写入该校独立环境。请先核对学校及文件；已有学生数据的环境不能再次初始化。` : "未选择已开通的学校，请返回网站首页选择。";
+    document.getElementById("school-name").value = school?.name || "";
+    document.getElementById("school-code").value = school?.code || "";
+    document.getElementById("school-name").disabled = true;
+    document.getElementById("school-code").disabled = true;
+    document.getElementById("select-school").disabled = true;
+    document.getElementById("roster-file").disabled = !school || initialized;
+    document.getElementById("rooms-file").disabled = !school || initialized || !cloudRoster;
+    document.getElementById("roster-preview").textContent = initialized ? "已完成首次初始化" : cloudRoster ? `已核对${cloudRoster.records.length}名学生、${cloudRoster.classes.length}个班。` : "尚未选择名单文件";
+    document.getElementById("rooms-preview").textContent = initialized ? "寝室已由云端保存" : "请先核对学生名单";
+    document.getElementById("import-roster").textContent = "名单核对通过，继续寝室";
+    document.getElementById("import-rooms").textContent = "确认启用本校数据";
+    return;
+  }
+  document.getElementById("school-name").value = setupState?.schoolName || document.getElementById("school-name").value;
+  document.getElementById("school-code").value = currentSchool;
+  document.getElementById("roster-file").disabled = !currentSchool;
+  document.getElementById("rooms-file").disabled = !setupState?.roster?.length;
+  document.getElementById("roster-preview").textContent = setupState?.roster?.length ? `已保存${setupState.roster.length}名学生、${setupState.classes.length}个班；选择新文件可重新导入。` : "尚未导入名单";
+  document.getElementById("rooms-preview").textContent = setupState?.rooms?.length ? `已保存${setupState.rooms.length}间寝室。` : "尚未导入寝室";
+  const studentUrl = currentSchool ? new URL(`../student/?school=${encodeURIComponent(currentSchool)}`, location.href).href : "";
+  document.getElementById("setup-status").innerHTML = setupState?.roster?.length
+    ? `当前：${escapeHtml(setupState.schoolName)}；${setupState.roster.length}名学生，${setupState.rooms?.length || 0}间寝室。学生演示入口：<a href="${escapeHtml(studentUrl)}">${escapeHtml(studentUrl)}</a>（仅本浏览器可读取演示名单）`
+    : "尚未导入名单，不能生成分寝建议。";
+}
+
+function applyDemoState() {
+  setupState = currentSchool ? window.DormSetup.readSetup(localStorage, currentSchool) : null;
+  const roster = setupState?.roster || [];
+  const surveys = new Map(window.DormApi.getMockSurveys().map(item => [item.studentId, item]));
+  students = roster.map(item => {
+    const answer = surveys.get(item.studentId);
+    return { id: item.studentId, sid: item.studentId, classId: item.classId, name: item.name, gender: item.gender,
+      status: answer ? (answer.bedNeed && answer.bedNeed !== "无" ? "review" : "completed") : "pending",
+      sleep: answer ? `${answer.bedTime || "未填"}上床` : "未填写", game: answer?.gamer || "未填写",
+      smoking: answer?.smoking || "未填写", tag: answer?.socialStyle || "等待问卷", bedNeed: answer?.bedNeed, specialNote: answer?.specialNote };
+  });
+  groups = [];
+  classMeta = Object.fromEntries((setupState?.classes || []).map(item => {
+    const own = students.filter(student => student.classId === item.classId);
+    const beds = (setupState.rooms || []).filter(room => room.classId === item.classId);
+    return [item.classId, { name: item.className, total: own.length, submitted: own.filter(student => student.status !== "pending").length,
+      groups: 0, review: own.filter(student => student.status === "review").length,
+      male: own.filter(student => student.gender === "男").length, female: own.filter(student => student.gender === "女").length,
+      maleBeds: beds.filter(room => room.gender === "男").length * 4, femaleBeds: beds.filter(room => room.gender === "女").length * 4 }];
+  }));
+  updateClassPicker();
+  updateSetupView();
+  document.getElementById("run-allocation").disabled = !setupState?.roster?.length || !setupState?.rooms?.length;
+}
+
+document.getElementById("select-school").addEventListener("click", () => {
+  try {
+    const code = window.DormSetup.schoolCode(document.getElementById("school-code").value);
+    const name = document.getElementById("school-name").value.trim();
+    if (!name) throw new Error("请填写学校名称");
+    currentSchool = code;
+    setupState = window.DormSetup.readSetup(localStorage, code) || { schoolName: name, roster: [], classes: [], rooms: [] };
+    setupState.schoolName = name;
+    window.DormSetup.saveSetup(localStorage, code, setupState);
+    history.replaceState(null, "", `${location.pathname}?school=${encodeURIComponent(code)}`);
+    selectedClass = "all";
+    resetAllocation();
+    renderAll();
+    showToast(`已进入${name}的本机演示空间`);
+  } catch (error) { showToast(error.message); }
+});
+
+document.getElementById("roster-file").addEventListener("change", async event => {
+  stagedRoster = null;
+  document.getElementById("import-roster").disabled = true;
+  try {
+    const file = event.target.files[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) throw new Error("名单文件不能超过2MB");
+    stagedRoster = window.DormSetup.validateRoster(await file.text());
+    document.getElementById("roster-preview").textContent = `检查通过：${stagedRoster.records.length}名学生、${stagedRoster.classes.length}个班。${window.DormApi?.isCloud() ? "继续核对寝室后，才能一次性写入本校云环境。" : "确认导入会替换该学校旧名单和问卷。"}`;
+    document.getElementById("import-roster").disabled = false;
+  } catch (error) { document.getElementById("roster-preview").textContent = error.message; }
+});
+
+document.getElementById("import-roster").addEventListener("click", () => {
+  if (!stagedRoster) return;
+  if (window.DormApi?.isCloud()) {
+    if (students.length || !window.DormApi.schoolInfo()) return;
+    cloudRoster = stagedRoster;
+    stagedRoster = null;
+    document.getElementById("import-roster").disabled = true;
+    updateSetupView();
+    showToast("名单已核对，请继续导入寝室");
+    return;
+  }
+  if (!setupState || !currentSchool) return;
+  if (setupState.roster.length && !confirm("重新导入会清除该学校本机演示问卷和寝室，请确认。")) return;
+  setupState.roster = stagedRoster.records;
+  setupState.classes = stagedRoster.classes;
+  setupState.rooms = [];
+  window.DormSetup.saveSetup(localStorage, currentSchool, setupState);
+  localStorage.removeItem(`dorm-networked-mock-v1:${currentSchool}`);
+  localStorage.removeItem(`roommate-questionnaire-standalone-demo-v1:${currentSchool}`);
+  stagedRoster = null;
+  document.getElementById("import-roster").disabled = true;
+  resetAllocation();
+  renderAll();
+  showToast("名单已保存，请继续导入寝室");
+});
+
+document.getElementById("rooms-file").addEventListener("change", async event => {
+  stagedRooms = null;
+  document.getElementById("import-rooms").disabled = true;
+  try {
+    const file = event.target.files[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) throw new Error("寝室文件不能超过2MB");
+    stagedRooms = window.DormSetup.validateRooms(await file.text(), window.DormApi?.isCloud() ? cloudRoster?.classes || [] : setupState.classes);
+    document.getElementById("rooms-preview").textContent = `检查通过：${stagedRooms.length}间寝室。`;
+    document.getElementById("import-rooms").disabled = false;
+  } catch (error) { document.getElementById("rooms-preview").textContent = error.message; }
+});
+
+document.getElementById("import-rooms").addEventListener("click", async () => {
+  if (!stagedRooms) return;
+  if (window.DormApi?.isCloud()) {
+    if (!cloudRoster || students.length) return;
+    if (!confirm(`确定为${window.DormApi.schoolInfo().name}首次导入${cloudRoster.records.length}名学生和${stagedRooms.length}间寝室吗？`)) return;
+    const button = document.getElementById("import-rooms");
+    button.disabled = true;
+    button.textContent = "正在写入云端…";
+    try {
+      const expectedCount = cloudRoster.records.length;
+      await window.DormApi.initializeSchool(cloudRoster.records, stagedRooms);
+      cloudRoster = null; stagedRooms = null;
+      const loaded = await renderAll();
+      showToast(loaded && students.length === expectedCount ? "名单和寝室已写入本校云环境" : "云端已接收导入，但读取核对未完成；请刷新工作台确认");
+    } catch (error) {
+      button.disabled = false;
+      showToast(`导入失败：${window.DormApi.userMessage(error)}`);
+    } finally { button.textContent = "确认启用本校数据"; }
+    return;
+  }
+  if (!setupState) return;
+  setupState.rooms = stagedRooms;
+  window.DormSetup.saveSetup(localStorage, currentSchool, setupState);
+  stagedRooms = null;
+  document.getElementById("import-rooms").disabled = true;
+  resetAllocation();
+  renderAll();
+  showToast("寝室已保存，可以开始本机流程演示");
+});
+
 function showToast(message) {
   const toast = document.getElementById("toast");
   toast.textContent = message;
@@ -76,20 +204,22 @@ function showToast(message) {
   toastTimer = setTimeout(() => toast.classList.remove("show"), 2400);
 }
 
+function authKey() { return window.DormApi?.isCloud() ? `${AUTH_KEY}:${window.DormApi.schoolInfo()?.code || "unselected"}` : AUTH_KEY; }
 function validSession() {
-  const timestamp = Number(sessionStorage.getItem(AUTH_KEY));
+  const timestamp = Number(sessionStorage.getItem(authKey()));
   return timestamp > 0 && Date.now() - timestamp < SESSION_LENGTH;
 }
 
 async function openWorkspace() {
-  sessionStorage.setItem(AUTH_KEY, String(Date.now()));
+  sessionStorage.setItem(authKey(), String(Date.now()));
   loginView.hidden = true;
   app.hidden = false;
   await renderAll();
+  if ((!window.DormApi?.isCloud() && !setupState?.roster?.length) || (window.DormApi?.isCloud() && !students.length)) activateView("setup");
 }
 
 function closeWorkspace(message = "已安全退出工作台") {
-  sessionStorage.removeItem(AUTH_KEY);
+  sessionStorage.removeItem(authKey());
   app.hidden = true;
   loginView.hidden = false;
   passwordInput.value = "";
@@ -117,6 +247,10 @@ function updateLockState() {
 
 loginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (window.DormApi?.isCloud() && !window.DormApi.schoolInfo?.()) {
+    loginError.textContent = "请先返回网站首页选择已开通的学校。";
+    return;
+  }
   if (updateLockState()) return;
   loginButton.disabled = true;
   loginButton.firstChild.textContent = "正在验证 ";
@@ -158,10 +292,10 @@ document.getElementById("logout").addEventListener("click", () => closeWorkspace
 app.addEventListener("click", () => {
   // 工作台已关闭时（含刚点完退出的冒泡），不允许续期会话，否则退出后刷新会免密进入。
   if (app.hidden) return;
-  sessionStorage.setItem(AUTH_KEY, String(Date.now()));
+  sessionStorage.setItem(authKey(), String(Date.now()));
 });
 
-const pageTitles = { overview: "工作台总览", surveys: "问卷管理", groups: "组队审核", allocation: "分寝建议" };
+const pageTitles = { setup: "首次设置", overview: "工作台总览", surveys: "问卷管理", groups: "组队审核", allocation: "分寝建议" };
 function activateView(view) {
   document.querySelectorAll(".nav-button").forEach((item) => item.classList.toggle("active", item.dataset.view === view));
   document.querySelectorAll(".view").forEach((item) => item.classList.toggle("active", item.id === `view-${view}`));
@@ -191,7 +325,7 @@ document.getElementById("class-select").addEventListener("change", (event) => {
   generatedRooms = [];
   renderAll();
   resetAllocation();
-  showToast(selectedClass === "all" ? "已切换到全部4个班" : `已切换到${classMeta[selectedClass].name}`);
+  showToast(selectedClass === "all" ? "已切换到全部班级" : `已切换到${classMeta[selectedClass].name}`);
 });
 
 function activeClassIds() {
@@ -211,9 +345,9 @@ function totals() {
 
 function renderOverview() {
   const summary = totals();
-  document.getElementById("roster-notice-title").textContent = `正式名单已导入 · ${summary.total}名学生`;
-  document.getElementById("roster-notice-text").textContent = selectedClass === "all" ? "工业机器人1—4班名单已接入，系统按班级和性别严格分开匹配。" : `${classMeta[selectedClass].name}名单已接入，学生之间不展示完整问卷。`;
-  document.getElementById("roster-notice-badge").textContent = window.DormApi?.isCloud() ? "正式运行" : "本机演示";
+  document.getElementById("roster-notice-title").textContent = summary.total ? `${window.DormApi?.isCloud() ? "已读取名单" : "本机演示名单"} · ${summary.total}名学生` : "等待导入学生名单";
+  document.getElementById("roster-notice-text").textContent = summary.total ? (selectedClass === "all" ? `${Object.keys(classMeta).length}个班级已接入。` : `${classMeta[selectedClass].name}名单已接入。`) : (window.DormApi?.isCloud() ? "尚未读取到云端名单，请检查连接与权限。" : "请在“首次设置”中选择学校并导入名单。" );
+  document.getElementById("roster-notice-badge").textContent = window.DormApi?.isCloud() ? "云端试点" : "本机演示";
   document.getElementById("metric-total").textContent = summary.total;
   document.getElementById("metric-submitted").textContent = summary.submitted;
   document.getElementById("metric-rate").textContent = `完成率 ${summary.total ? Math.round(summary.submitted / summary.total * 100) : 0}%`;
@@ -222,7 +356,7 @@ function renderOverview() {
   document.getElementById("class-cards").innerHTML = Object.entries(classMeta).map(([id, item]) => {
     const rate = item.total ? Math.round(item.submitted / item.total * 100) : 0;
     const capacity = Number.isFinite(item.maleBeds) ? `男${item.male || 0}/${item.maleBeds}床 · 女${item.female || 0}/${item.femaleBeds}床` : `${item.groups}个完整四人组`;
-    return `<article class="class-card" data-class-card="${id}"><div class="class-card-head"><h3>${item.name}</h3><span>${rate}%</span></div><div class="mini-progress"><i style="width:${rate}%"></i></div><small>${item.submitted}人已填 / ${item.total}人 · ${capacity}</small></article>`;
+    return `<article class="class-card" data-class-card="${escapeHtml(id)}"><div class="class-card-head"><h3>${escapeHtml(item.name)}</h3><span>${rate}%</span></div><div class="mini-progress"><i style="width:${rate}%"></i></div><small>${item.submitted}人已填 / ${item.total}人 · ${capacity}</small></article>`;
   }).join("");
   document.querySelectorAll("[data-class-card]").forEach((card) => card.addEventListener("click", () => {
     selectedClass = card.dataset.classCard;
@@ -346,21 +480,18 @@ async function generateRooms() {
     }
     return;
   }
+  if (!setupState?.roster?.length || !setupState?.rooms?.length) return showToast("请先导入名单和寝室");
   generatedRooms = [];
-  activeClassIds().forEach((classId) => {
-    const eligible = students.filter((student) => student.classId === classId && student.status !== "pending");
-    const used = new Set();
-    groups.filter((group) => group.classId === classId && group.memberIds.length === 4).forEach((group) => {
-      const members = group.memberIds.map((id) => students.find((student) => student.id === id)).filter(Boolean);
-      members.forEach((member) => used.add(member.id));
-      generatedRooms.push({ classId, members, fixed: true, note: "完整意向组，四人均已填写问卷并确认" });
+  generatedPending = [];
+  for (const classId of activeClassIds()) for (const gender of ["男", "女"]) {
+    const eligible = students.filter(student => student.classId === classId && student.gender === gender && student.status !== "pending");
+    const inventory = setupState.rooms.filter(room => room.classId === classId && room.gender === gender && room.active);
+    inventory.forEach((room, index) => {
+      const members = eligible.slice(index * 4, index * 4 + 4);
+      if (members.length) generatedRooms.push({ classId, gender, roomNumber: room.roomNumber, members, fixed: false, note: "本机演示按名单顺序放入可用床位，正式匹配须另行审核" });
     });
-    const remaining = eligible.filter((student) => !used.has(student.id)).sort((a, b) => a.sleep.localeCompare(b.sleep));
-    for (let index = 0; index < remaining.length; index += 4) {
-      const members = remaining.slice(index, index + 4);
-      generatedRooms.push({ classId, members, fixed: false, note: members.some((member) => member.status === "review") ? "包含已提交的特殊住宿需求，请辅导员确认床位" : "按作息与生活习惯生成的演示建议" });
-    }
-  });
+    eligible.slice(inventory.length * 4).forEach(student => generatedPending.push({ ...student, reason: "该班该性别床位不足，请补充寝室" }));
+  }
   renderRooms();
   showToast(`已生成${generatedRooms.length}间演示寝室建议`);
 }
@@ -369,7 +500,7 @@ function renderRooms() {
   document.getElementById("allocation-empty").style.display = "none";
   const grid = document.getElementById("room-grid");
   grid.classList.add("show");
-  grid.innerHTML = generatedRooms.map((room, index) => { const className = room.classId === "shared" ? "跨班机动女寝" : classMeta[room.classId].name; return `<article class="room-card"><div class="room-card-head"><div><h3>${className} · ${escapeHtml(room.roomNumber || `建议寝室${String(index + 1).padStart(2, "0")}`)}</h3><small>${escapeHtml(room.gender || "未登记性别")}寝 · 4人间</small></div><span>${room.fixed ? "固定意向组" : room.members.length === 4 ? "系统建议" : `待补${4 - room.members.length}人`}</span></div><ul>${room.members.map((member) => `<li><b>${escapeHtml(member.name)}</b><span>${escapeHtml(member.tag)}</span></li>`).join("")}</ul><p>${escapeHtml(room.note)}</p><p class="bed-rule">发布后学生可查看寝室号和同寝室成员</p></article>`; }).join("");
+  grid.innerHTML = generatedRooms.map((room, index) => { const className = room.classId === "shared" ? "跨班机动女寝" : (classMeta[room.classId]?.name || room.classId); return `<article class="room-card"><div class="room-card-head"><div><h3>${escapeHtml(className)} · ${escapeHtml(room.roomNumber || `建议寝室${String(index + 1).padStart(2, "0")}`)}</h3><small>${escapeHtml(room.gender || "未登记性别")}寝 · 4人间</small></div><span>${room.fixed ? "固定意向组" : room.members.length === 4 ? "系统建议" : `待补${4 - room.members.length}人`}</span></div><ul>${room.members.map((member) => `<li><b>${escapeHtml(member.name)}</b><span>${escapeHtml(member.tag)}</span></li>`).join("")}</ul><p>${escapeHtml(room.note)}</p><p class="bed-rule">发布后学生可查看寝室号和同寝室成员</p></article>`; }).join("");
   document.getElementById("export-rooms").disabled = false;
   const expectedIds = new Set(students.filter((student) => activeClassIds().includes(student.classId) && student.status !== "pending").map((student) => student.id));
   const placedIds = new Set(generatedRooms.flatMap((room) => room.members.map((member) => member.id)));
@@ -442,19 +573,30 @@ document.getElementById("export-rooms").addEventListener("click", () => {
 });
 
 async function renderAll() {
+  let loaded = true;
   if (window.DormApi?.isCloud()) {
     try {
       const remote = await window.DormApi.getAdminDashboard(selectedClass);
-      if (remote?.classMeta) classMeta = remote.classMeta;
-      if (Array.isArray(remote?.students)) students = remote.students;
-      if (Array.isArray(remote?.groups)) groups = remote.groups;
+      if (!remote || !remote.classMeta || !Array.isArray(remote.students) || !Array.isArray(remote.groups)) throw new Error("云端返回数据不完整");
+      classMeta = remote.classMeta;
+      students = remote.students;
+      groups = remote.groups;
+      updateClassPicker();
+      updateSetupView();
+      document.getElementById("run-allocation").disabled = !students.length;
     } catch (error) {
+      loaded = false;
+      classMeta = {}; students = []; groups = [];
+      updateClassPicker();
+      updateSetupView();
+      document.getElementById("run-allocation").disabled = true;
       showToast(`云端数据读取失败：${window.DormApi.userMessage(error)}`);
     }
-  }
+  } else applyDemoState();
   renderOverview();
   renderStudents();
   renderGroups();
+  return loaded;
 }
 
 if (validSession()) openWorkspace();
